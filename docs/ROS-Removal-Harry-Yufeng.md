@@ -1,19 +1,32 @@
+# WL-Local-Server Feature Branch: noROS_Synchronizer-Harry-Yufeng
+
+## Description
+
+This branch is about setting up the Wi-Fi CSI collector without the need for ROS, rather utilizing a Python socket script as well as an MQTT publisher to send the Wi-Fi messages.
+
+## Key Changes
+
+This feature introduces the following changes:
+
+- Implemented a Python script without the need for ROS to collect Wi-Fi CSI data.
+- Utilized an MQTT publisher to send the CSI data.
+
 # ROS Wrapper for Nexmon-CSI
 
-This is a package for integrating the [nexmon-csi](https://github.com/seemoo-lab/nexmon_csi) platform for an [ASUS RT-AC86U AP](https://www.asus.com/us/networking-iot-servers/wifi-routers/asus-wifi-routers/rt-ac86u/) with ROS. It is currently tested on ROS kinetic, melodic, and noetic.
+This is a package for integrating the [nexmon-csi](https://github.com/seemoo-lab/nexmon_csi) platform for an [ASUS RT-AC86U AP](https://www.asus.com/us/networking-iot-servers/wifi-routers/asus-wifi-routers/rt-ac86u/) using Python socket packages. It is currently tested utilizing Python on a Raspberry Pi using Ubuntu 20.04.
 
 < Go back to the [index page](https://github.com/ucsdwcsng/WiROS)
 
 ## Motivation
 
-This tool provides open-source capability for collecting and processing CSI data in an online, scalable manner. While CSI extraction is a well studied topic, the integration of this CSI data into a larger sensor framework presents a lot of systems challenges for researchers. We leverage the robotics community's sensor management tool, [ROS](https://www.ros.org/), which provides a natural framework for measuring and collating CSI data from many access points, as well as running Wi-Fi sensing based localization and SLAM algorithms in real-time inside the ROS stack. This package provides ROS nodes to interface with the AC86U's CSI collector and publish data as a ROS message. We have also released a [package](https://github.com/ucsdwcsng/ros_bearing_sensor) which implements bearing-estimation algorithms on the collected CSI data.
+This tool provides open-source capability for collecting and processing CSI data in an online, scalable manner. While CSI extraction is a well studied topic, the integration of this CSI data into a larger sensor framework presents a lot of systems challenges for researchers. We worked on removing the robotics community's sensor management tool, [ROS](https://www.ros.org/), which caused software issues on Raspberry Pi's utilizing Ubuntu 20.04.
 
-<p align="center"> <img src="docs/asus_array.jpg" height=30%, width=30%> </p>
+<p align="center"> <img src="asus_array.jpg" height=30%, width=30%> </p>
 <p align="center"> RT_AC86u with array setup for signal Angle-of-Arrival sensing </p>
 
 ## Installation and Setup
 
-The project consists of a core node which interacts with the ASUS router via ethernet, and some secondary nodes which provide additional functionality. You need a computer running ROS with an ethernet port to run the platform, and an RT-AC86u AP. If you want to measure AoA, you will need to move the antennas' positions to create a useful array. We suggest removing the plastic case from the AP using the two screws on the back and placing the antennas in a permanent housing like as shown above.
+The project consists of a core node which interacts with the ASUS router via ethernet, and some secondary nodes which provide additional functionality. You need a computer with an ethernet port to run the platform, and an RT-AC86u AP. If you want to measure AoA, you will need to move the antennas' positions to create a useful array. We suggest removing the plastic case from the AP using the two screws on the back and placing the antennas in a permanent housing like as shown above.
 
 ### Step 1: Setting up the Router
 
@@ -36,40 +49,7 @@ The project consists of a core node which interacts with the ASUS router via eth
   - Set timeout to zero.
   - Apply the settings and proceed to the next step.
 
-### Step 2: Installing the ROS package
-
-- If you do not already have a catkin workspace:
-
-```
-cd ~ && mkdir -p wifi_ws/src && cd wifi_ws && catkin init
-```
-
-- Enter the source folder and clone this repository:
-
-```
-cd src && git clone git@github.com:ucsdwcsng/wiros_csi_node.git
-```
-
-- Install the [rf_msgs](https://github.com/ucsdwcsng/rf_msgs) dependency to your source folder (Adds ROS messages for CSI information)
-
-```
-git clone git@github.com:ucsdwcsng/rf_msgs.git
-```
-
-- Build the node
-
-```
-catkin config --install #(optional)
-catkin build (or) catkin_make
-```
-
-- Remember to add the setup script to your .bashrc:
-
-```
-echo "source ~/wifi_ws/install/setup.bash" >> ~/.bashrc
-```
-
-### Step 3: Installing the Nexmon CSI firmware
+### Step 2: Installing the Nexmon CSI firmware
 
 - The AP has non-volatile storage mounted at /jffs/ which is where we will install the necessary scripts and binaries, located in nexmon_firmware/csi.
 
@@ -87,17 +67,16 @@ sshpass -p PASSWORD ssh USERNAME@IP chmod +x /jffs/csi/*.sh
 
 ## Usage Instructions
 
-On a high level, when you start `csi_node`, it will attempt to log into the AP and set it to monitor mode. Any packets the AP sees will then be sent over ethernet to the node, where they are converted to ROS message format. While the node can be started with `rosrun`, we highly recommend using a roslaunch file due to the number of parameters which need to be set to ensure you get the data that you want.
+On a high level, when you start `csi_node`, it will attempt to log into the AP and set it to monitor mode. Any packets the AP sees will then be sent over ethernet to the node, where they are read and sent to an MQTT publisher.
 
 ### Launch
 
-An example launch script is located in the `launch` folder:
+To launch the Wi-Fi CSI collector, run the following commands after cloning the wiros_csi_node repo.
 
 ```
-launch/basic.launch
+cd wiros_csi_node/src/pythonNoRos
+python3 nexcsiserver.py
 ```
-
-You should copy this script and modify the parameters to suit your needs.
 
 ### Parameters
 
@@ -132,16 +111,10 @@ For example, to listen on channel 155 (80MHz centered at 5.775 GHz), you would s
 
 ### Using the Data
 
-The `csi_node` publishes `WiFi` message data on the `/csi` topic. More information about the messages is [here](https://github.com/ucsdwcsng/rf_msgs).
-Additionally, we have made scripts available to convert rosbags containing CSI info to .npz or .mat files for
-convenient post-processing [here](https://github.com/ucsdwcsng/ros_bearing_sensor).
+The `csi_node` publishes `WiFi` message data on the MQTT `/csi` topic. More information about the messages is [here](https://github.com/ucsdwcsng/rf_msgs).
 This repo also contains functionality such as processing the CSI data in real time to give real-time angle of arrival, angle of departure, and calculation of calibration values.
 
 ## Real-Time channel switching
-
-### Via ROS Services
-
-You can switch the channel/bandwidth/MAC filter on the fly by calling the service `csi_node/configure_csi`. It can be done either from the command line (type `rosservice call /csi_node/configure_csi` and triple-tab to get the command line format suggested) or programatically via the rosservice API.
 
 ### Automatic
 
