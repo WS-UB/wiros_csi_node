@@ -4,6 +4,7 @@ import subprocess
 import re
 import json
 import time
+import datetime
 import signal
 import sys
 import random
@@ -228,7 +229,7 @@ def parse_csi(data: bytes, nbytes: int):
     out.n_cols = 4
     out.ap_id = 0
     out.rx_id = rx_ip
-    out.stamp = time.time_ns()
+    out.stamp = datetime.datetime.now()
 
     if out.bw == 0x4:
         out.bw = 80
@@ -270,7 +271,7 @@ def parse_csi(data: bytes, nbytes: int):
 def publish_csi(channel_current: List[CsiInstance]):
     print("Publishing CSI data...")
     for csi in channel_current:
-        msg = f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp:{csi.stamp}"
+        msg = f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp;{csi.stamp}"
         CLIENT.publish(topic, msg)
         print(
             f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp:{csi.stamp}"
