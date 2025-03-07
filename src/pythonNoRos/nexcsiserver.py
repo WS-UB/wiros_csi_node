@@ -56,7 +56,7 @@ def string_to_bool(string):
 address = "128.205.218.189"
 mqtt_port = 1883
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
-CLIENT = mqtt_client.Client("client")
+CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
 topic = "/csi"
 
 
@@ -67,7 +67,7 @@ def connect_mqtt():
         else:
             print("Failed to connect, return code %d\n", rc)
 
-    client = mqtt_client.Client(client_id)
+    client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, client_id)
     # client.username_pw_set(username, password)
     client.on_connect = on_connect
     client.connect(address, mqtt_port)
@@ -140,6 +140,7 @@ with open("src/pythonNoRos/config.json", "r") as file:
     length = int(config_data["packet_params"][0]["length"])
 
     filter = MacFilter(mac_filter, length)
+
 
 # Execute a shell command and return the output
 def sh_exec_block(cmd: str) -> str:
