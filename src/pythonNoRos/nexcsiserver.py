@@ -4,6 +4,7 @@ import subprocess
 import re
 import json
 import time
+import datetime
 import signal
 import sys
 import random
@@ -55,7 +56,7 @@ def string_to_bool(string):
 address = "128.205.218.189"
 mqtt_port = 1883
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
-CLIENT = mqtt_client.Client("client")
+CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
 topic = "/csi"
 
 
@@ -66,7 +67,7 @@ def connect_mqtt():
         else:
             print("Failed to connect, return code %d\n", rc)
 
-    client = mqtt_client.Client(client_id)
+    client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, client_id)
     # client.username_pw_set(username, password)
     client.on_connect = on_connect
     client.connect(address, mqtt_port)
@@ -139,6 +140,7 @@ with open("src/pythonNoRos/config.json", "r") as file:
     length = int(config_data["packet_params"][0]["length"])
 
     filter = MacFilter(mac_filter, length)
+
 
 # Execute a shell command and return the output
 def sh_exec_block(cmd: str) -> str:
@@ -228,7 +230,7 @@ def parse_csi(data: bytes, nbytes: int):
     out.n_cols = 4
     out.ap_id = 0
     out.rx_id = rx_ip
-    out.stamp = time.time_ns()
+    out.stamp = datetime.datetime.now()
 
     if out.bw == 0x4:
         out.bw = 80
@@ -270,7 +272,7 @@ def parse_csi(data: bytes, nbytes: int):
 def publish_csi(channel_current: List[CsiInstance]):
     print("Publishing CSI data...")
     for csi in channel_current:
-        msg = f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp:{csi.stamp}"
+        msg = f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp;{csi.stamp}"
         CLIENT.publish(topic, msg)
         print(
             f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp:{csi.stamp}"
