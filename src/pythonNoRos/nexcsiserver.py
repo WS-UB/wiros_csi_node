@@ -57,7 +57,7 @@ address = "128.205.218.189"
 mqtt_port = 1883
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
 CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
-topic = "/csi"
+topic = "/csi-ap1"
 
 
 def connect_mqtt():
@@ -144,9 +144,18 @@ with open("src/pythonNoRos/config.json", "r") as file:
 
 # Execute a shell command and return the output
 def sh_exec_block(cmd: str) -> str:
-    result = subprocess.run(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        print("Process Timeout...")
+        return
     return result.stdout
 
 
@@ -197,6 +206,30 @@ def reconfigure() -> str:
 
     else:
         configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/setup.sh {ch} {bw} 4 2>&1"
+    print(configcmd)
+    return sh_exec_block(configcmd)
+
+
+def reconnect() -> str:
+    global iface, tx_nss
+    if ch >= 32:
+        iface = "eth6"
+        tx_nss = min(tx_nss, 4)
+    else:
+        iface = "eth5"
+        tx_nss = min(tx_nss, 3)
+
+    if filter.len > 1:
+        configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/configcsi.sh {ch} {bw} 4 {filter.mac[0]:02x}:{filter.mac[1]:02x}:{filter.mac[2]:02x}:{filter.mac[3]:02x}:{filter.mac[4]:02x}:{filter.mac[5]:02x} 2>&1"
+
+    else:
+        configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/configcsi.sh {ch} {bw} 4 2>&1"
+    print(configcmd)
+    return sh_exec_block(configcmd)
+
+
+def reload_router() -> str:
+    configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/reload.sh 2>&1"
     print(configcmd)
     return sh_exec_block(configcmd)
 
@@ -306,6 +339,15 @@ def main():
             data, addr = sockfd.recvfrom(CSI_BUF_SIZE)
             parse_csi(data, len(data))
         except socket.timeout:
+            print("Socket Timeout")
+            reload_router()
+            time.sleep(5)
+            reconnect()
+            print("Starting CSI collection")
+            sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sockfd.settimeout(1.0)
+            sockfd.bind(("0.0.0.0", PORT))
+
             continue
         except Exception as e:
             print(f"Socket Error: {e}")
