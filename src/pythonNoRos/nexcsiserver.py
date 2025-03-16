@@ -154,7 +154,8 @@ def sh_exec_block(cmd: str) -> str:
             timeout=10,
         )
     except subprocess.TimeoutExpired:
-        print("Process Timeout...")
+        print("Process Timeout")
+        print("Retrying...")
         return
     return result.stdout
 
@@ -341,7 +342,8 @@ def main():
         except socket.timeout:
             print("Socket Timeout")
             reload_router()
-            time.sleep(5)
+            print("Reloading Router...")
+            time.sleep(3)
             reconnect()
             print("Starting CSI collection")
             sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
