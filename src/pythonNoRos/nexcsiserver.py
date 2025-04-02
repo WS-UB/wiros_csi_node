@@ -15,7 +15,7 @@ import time
 from typing import List, Tuple
 
 # Constants
-CSI_BUF_SIZE = 4096
+CSI_BUF_SIZE = 16384
 PORT = 5500
 PORT_TCP = 50005
 
@@ -29,7 +29,7 @@ use_tcp = False
 no_config = False
 hostname = ""
 ch = 157
-bw = 80
+bw = 20
 beacon = 200.0
 iface = ""
 tx_nss = 4
@@ -41,6 +41,65 @@ csi_data = bytearray(CSI_BUF_SIZE)
 csi_r_out = None
 csi_i_out = None
 csi_size = 0
+
+# Define masks (based on C++ code)
+E_MASK = 0x000F0000  # Extracts exponent
+R_MANT_MASK = 0x0003FFC0  # Extracts real mantissa
+I_MANT_MASK = 0x0000003F  # Extracts imaginary mantissa
+R_SIGN_MASK = 0x00080000  # Extracts real sign
+I_SIGN_MASK = 0x00000008  # Extracts imaginary sign
+COUNT_MASK = 0x200  # Used for mantissa shifting
+MANT_MASK = 0x3FF  # Final mantissa mask
+
+
+def decode_csi(csi_data, n_sub):
+    csi = struct.unpack(f"<{n_sub * 4 * 4}I", csi_data)
+    csi_r_buf = []
+    csi_i_buf = []
+
+    for i in range(n_sub):
+        c = csi[i]
+
+        # Extract exponent and shift to IEEE 754 format
+        exp = ((c & E_MASK) >> 16) - 31 + 1023
+        r_exp = exp
+        i_exp = exp
+
+        # Extract mantissas
+        r_mant = (c & R_MANT_MASK) >> 6
+        i_mant = c & I_MANT_MASK
+
+        # Normalize real mantissa
+        e_shift = 0
+        while not (r_mant & COUNT_MASK):
+            r_mant <<= 1
+            e_shift += 1
+            if e_shift == 10:
+                r_exp = 1023
+                r_mant = 0
+                break
+        r_exp -= e_shift
+
+        # Normalize imaginary mantissa
+        e_shift = 0
+        while not (i_mant & COUNT_MASK):
+            i_mant <<= 1
+            e_shift += 1
+            if e_shift == 10:
+                i_exp = 1023
+                i_mant = 0
+                break
+        i_exp -= e_shift
+
+        # Construct IEEE 754 double-precision representation
+        c_r = ((c & R_SIGN_MASK) << 34) | ((r_mant & MANT_MASK) << 42) | (r_exp << 52)
+        c_i = ((c & I_SIGN_MASK) << 46) | ((i_mant & MANT_MASK) << 42) | (i_exp << 52)
+
+        # Convert to float using struct
+        csi_r_buf.append(struct.unpack("d", struct.pack("Q", c_r))[0])
+        csi_i_buf.append(struct.unpack("d", struct.pack("Q", c_i))[0])
+
+    return csi_r_buf, csi_i_buf
 
 
 def string_to_bool(string):
@@ -57,7 +116,7 @@ address = "128.205.218.189"
 mqtt_port = 1883
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
 CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
-topic = "/csi-ap1"
+topic = "/csi-ap3"
 
 
 def connect_mqtt():
@@ -87,8 +146,8 @@ class CsiInstance:
         self.source_mac = [0] * 6
         self.seq_num = 0
         self.rssi = 0
-        self.tx = 0
-        self.rx = 0
+        self.tx = 4
+        self.rx = 4
         self.channel = 0
         self.bw = 0
         self.n_sub = 0
@@ -118,7 +177,7 @@ class CsiUdpFrame:
         self.chip = 0
 
 
-with open("src/pythonNoRos/config.json", "r") as file:
+with open("config.json", "r") as file:
     config_data = json.load(file)
 
     rx_ip = config_data["login"][0]["host_ip"]
@@ -202,6 +261,9 @@ def reconfigure() -> str:
         iface = "eth5"
         tx_nss = min(tx_nss, 3)
 
+    print(ch)
+    print(bw)
+
     if filter.len > 1:
         configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/setup.sh {ch} {bw} 4 {filter.mac[0]:02x}:{filter.mac[1]:02x}:{filter.mac[2]:02x}:{filter.mac[3]:02x}:{filter.mac[4]:02x}:{filter.mac[5]:02x} 2>&1"
 
@@ -279,12 +341,20 @@ def parse_csi(data: bytes, nbytes: int):
 
     n_sub = int(out.bw * 3.2)
     out.n_sub = n_sub
-    out.csi_r = [0.0] * n_sub
-    out.csi_i = [0.0] * n_sub
+    print(out.n_sub)
+    out.csi_r = [0.0] * n_sub * 4 * 4
+    out.csi_i = [0.0] * n_sub * 4 * 4
 
-    csi = struct.unpack(f"<{n_sub}I", data[18 : 18 + n_sub * 4])
+    # out.csi_r, out.csi_i = decode_csi(data[18 : 18 + n_sub * 4 *4 *4], n_sub)
 
-    for i in range(n_sub):
+    print(out.rx)
+
+    n_rx = 4  # Number of RX antennas
+    csi = struct.unpack(f"<{n_sub*4 * 4}I", data[18 : 18 + n_sub * n_rx * 4 * 4])
+
+    print(csi)
+
+    for i in range(n_sub * 4 * 4):
         out.csi_r[i] = float(csi[i] & 0xFFFF)  # Simplified CSI decoding
         out.csi_i[i] = float((csi[i] >> 16) & 0xFFFF)
 
@@ -337,8 +407,13 @@ def main():
 
     while True:
         try:
-            data, addr = sockfd.recvfrom(CSI_BUF_SIZE)
-            parse_csi(data, len(data))
+            total_data = b""
+            while len(total_data) < CSI_BUF_SIZE:
+                data, addr = sockfd.recvfrom(CSI_BUF_SIZE)
+                total_data += data
+
+            print(f"Total data size: {len(total_data)}")
+            parse_csi(total_data, len(total_data))
         except socket.timeout:
             print("Socket Timeout")
             reload_router()
