@@ -44,61 +44,58 @@ csi_i_out = None
 csi_size = 0
 
 # Define masks (based on C++ code)
-E_MASK = 0x000F0000  # Extracts exponent
-R_MANT_MASK = 0x0003FFC0  # Extracts real mantissa (corrected from original)
-I_MANT_MASK = 0x0000003F  # Extracts imaginary mantissa
-R_SIGN_MASK = 0x00080000  # Extracts real sign
-I_SIGN_MASK = 0x00000008  # Extracts imaginary sign
-COUNT_MASK = 0x200  # Used for mantissa shifting
-MANT_MASK = 0x3FF  # Final mantissa mask
+E_MASK = 0x3F              # 6-bit exponent (bits [0:5])
+R_MANT_MASK = 0x1FFC0000   # Real mantissa (bits [18:28])
+I_MANT_MASK = 0x00007FC0   # Imag mantissa (bits [6:16])
+R_SIGN_MASK = 0x20000000   # Real sign (bit 29)
+I_SIGN_MASK = 0x00020000   # Imag sign (bit 17)
+COUNT_MASK = 0x400         # For mantissa normalization check (bit 10)
+MANT_MASK = 0x3FF          # Lower 10 bits of mantissa
 
 def decode_csi(csi_data, n_sub):
-    """Decode CSI data according to the IEEE 754 double-precision format"""
-    csi = struct.unpack(f"<{n_sub * 4 * 4}I", csi_data)
+    csi = struct.unpack(f"<{n_sub}I", csi_data)
     csi_r_buf = []
     csi_i_buf = []
 
-    for i in range(n_sub * 4 * 4):  # 4x4 MIMO
+    for i in range(n_sub):
         c = csi[i]
 
-        # Extract exponent and shift to IEEE 754 format
-        exp = ((c & E_MASK) >> 16) - 31 + 1023
+        # Extract exponent and bias it
+        exp = (c & E_MASK) - 31 + 1023
         r_exp = exp
         i_exp = exp
 
-        # Extract mantissas (corrected shifts based on C++ code)
-        r_mant = (c & R_MANT_MASK) >> 6  # Corrected shift from C++ code
-        i_mant = (c & I_MANT_MASK) << 0  # No shift for imaginary
+        # Extract mantissas
+        r_mant = (c & R_MANT_MASK) >> 18
+        i_mant = (c & I_MANT_MASK) >> 6
 
         # Normalize real mantissa
         e_shift = 0
         while not (r_mant & COUNT_MASK) and e_shift < 10:
             r_mant <<= 1
             e_shift += 1
-        
         if e_shift == 10:
-            r_exp = 1023  # NaN or infinity
+            r_exp = 1023
             r_mant = 0
         else:
             r_exp -= e_shift
 
-        # Normalize imaginary mantissa
+        # Normalize imag mantissa
         e_shift = 0
         while not (i_mant & COUNT_MASK) and e_shift < 10:
             i_mant <<= 1
             e_shift += 1
-            
         if e_shift == 10:
-            i_exp = 1023  # NaN or infinity
+            i_exp = 1023
             i_mant = 0
         else:
             i_exp -= e_shift
 
-        # Construct IEEE 754 double-precision representation
+        # Compose double-precision floats
         c_r = ((c & R_SIGN_MASK) << 34) | ((r_mant & MANT_MASK) << 42) | (r_exp << 52)
         c_i = ((c & I_SIGN_MASK) << 46) | ((i_mant & MANT_MASK) << 42) | (i_exp << 52)
 
-        # Convert to float using struct
+        # Convert binary representation to float
         csi_r_buf.append(struct.unpack("d", struct.pack("Q", c_r))[0])
         csi_i_buf.append(struct.unpack("d", struct.pack("Q", c_i))[0])
 
