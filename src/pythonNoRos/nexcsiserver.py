@@ -42,6 +42,10 @@ csi_r_out = None
 csi_i_out = None
 csi_size = 0
 
+AP_LAT1, AP_LONG1 = (12, 15)
+AP_LAT2, AP_LONG2 = (12, 15)
+AP_LAT, AP_LONG = (12, 15)
+
 # Define masks (based on C++ code)
 E_MASK = 0x000F0000  # Extracts exponent
 R_MANT_MASK = 0x0003FFC0  # Extracts real mantissa
@@ -198,6 +202,13 @@ with open("config.json", "r") as file:
     mac_filter = ast.literal_eval(config_data["packet_params"][0]["mac_filter"])
     length = int(config_data["packet_params"][0]["length"])
 
+    AP_LAT = float(config_data["aoa_info"][0]["AP_lat"])
+    AP_LONG = float(config_data["aoa_info"][0]["AP_long"])
+    AP_LAT1 = float(config_data["aoa_info"][0]["lat1"])
+    AP_LONG1 = float(config_data["aoa_info"][0]["long1"])
+    AP_LAT2 = float(config_data["aoa_info"][0]["lat2"])
+    AP_LONG2 = float(config_data["aoa_info"][0]["long2"])
+
     filter = MacFilter(mac_filter, length)
 
 
@@ -216,6 +227,7 @@ def sh_exec_block(cmd: str) -> str:
         print("Process Timeout")
         print("Retrying...")
         return
+    print(result.stdout)
     return result.stdout
 
 
@@ -293,6 +305,12 @@ def reconnect() -> str:
 
 def reload_router() -> str:
     configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/reload.sh 2>&1"
+    print(configcmd)
+    return sh_exec_block(configcmd)
+
+
+def ifconfig() -> str:
+    configcmd = f"sudo ifconfig eth0 {rx_ip} netmask 255.255.255.0"
     print(configcmd)
     return sh_exec_block(configcmd)
 
@@ -377,10 +395,10 @@ def parse_csi(data: bytes, nbytes: int):
 def publish_csi(channel_current: List[CsiInstance]):
     print("Publishing CSI data...")
     for csi in channel_current:
-        msg = f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp;{csi.stamp}"
+        msg = f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp;{csi.stamp}, AP_location: {[AP_LAT, AP_LONG]}, AP_L1: {[AP_LAT1, AP_LONG1]}, AP_L2: {[AP_LAT2, AP_LONG2]}"
         CLIENT.publish(topic, msg)
         print(
-            f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp:{csi.stamp}"
+            f"MAC: {csi.source_mac}, RSSI: {csi.rssi}, Channel: {csi.channel}, BW: {csi.bw}, csi_i: {csi.csi_i}, csi_r: {csi.csi_r}, fc: {csi.fc}, n_sub: {csi.n_sub}, tx: {csi.tx}, n_rows: {csi.n_rows}, n_cols:{csi.n_cols}, ap_id: {csi.ap_id}, mcs: {csi.mcs}, rx_id: {csi.rx_id}, stamp;{csi.stamp}, AP_location: {[AP_LAT, AP_LONG]}, AP_L1: {[AP_LAT1, AP_LONG1]}, AP_L2: {[AP_LAT2, AP_LONG2]}"
         )
 
 
@@ -402,7 +420,7 @@ def main():
     # Start CSI collection
     print("Starting CSI collection")
     sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sockfd.settimeout(1.0)
+    sockfd.settimeout(10.0)
     sockfd.bind(("0.0.0.0", PORT))
 
     while True:
@@ -415,14 +433,15 @@ def main():
             print(f"Total data size: {len(total_data)}")
             parse_csi(total_data, len(total_data))
         except socket.timeout:
+            ifconfig()
             print("Socket Timeout")
             reload_router()
             print("Reloading Router...")
-            time.sleep(3)
+            time.sleep(7)
             reconnect()
             print("Starting CSI collection")
             sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sockfd.settimeout(1.0)
+            sockfd.settimeout(10.0)
             sockfd.bind(("0.0.0.0", PORT))
 
             continue
