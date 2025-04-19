@@ -356,29 +356,65 @@ def parse_csi(data: bytes, nbytes: int):
         print(f"Invalid Bandwidth received {out.bw}")
         return
 
-    NFFT = out.bw*3.2
     n_sub = int(out.bw * 3.2)
     out.n_sub = n_sub
-    print(out.n_sub)
-    out.csi_r = [0.0] * n_sub * 4 * 4
-    out.csi_i = [0.0] * n_sub * 4 * 4
+    out.csi_r = []
+    out.csi_i = []
 
-    # out.csi_r, out.csi_i = decode_csi(data[18 : 18 + n_sub * 4 *4 *4], n_sub)
+    # Extract CSI data (corrected section)
+    csi_data = data[18 : 18 + n_sub * 4]  # Each CSI entry is 4 bytes
+    if len(csi_data) < n_sub * 4:
+        print(f"Insufficient CSI data: got {len(csi_data)} bytes, need {n_sub*4}")
+        return
 
-    print(out.rx)
+    csi_entries = struct.unpack(f"<{n_sub}I", csi_data)  # Unpack n_sub entries
 
-    n_rx = 4  # Number of RX antennas
-    csi = struct.unpack(f"<{n_sub*4 * 4}I", data[18 : 18 + n_sub * n_rx * 4 * 4])
-    #csi = np.concatenate((csi[len(csi)//2:], csi[:len(csi)//2]), axis = 0)
+    # Process each CSI entry
+    for c in csi_entries:
+        # Extract exponent and shift to IEEE 754 format
+        exp = ((c & E_MASK) >> 16) - 31 + 1023
+        r_exp = exp
+        i_exp = exp
 
-    #print(data[18 : 18 + n_sub * n_rx * 4 * 4])
-    
-    
+        # Extract mantissas (corrected bit masks)
+        r_mant = (c & R_MANT_MASK) >> 6  # Real part: bits 6-21
+        i_mant = c & I_MANT_MASK         # Imag part: bits 0-5
 
-    for i in range(n_sub * 4 * 4):
-        out.csi_r[i] = float(csi[i] & 0xFFFF)  # Simplified CSI decoding
-        out.csi_i[i] = float((csi[i] >> 16) & 0xFFFF)
+        # Normalize real mantissa (matches C++ implementation)
+        e_shift = 0
+        while not (r_mant & COUNT_MASK):
+            r_mant <<= 1
+            e_shift += 1
+            if e_shift == 10:
+                r_exp = 1023
+                e_shift = 0
+                r_mant = 0
+                break
+        r_exp -= e_shift
 
+        # Normalize imaginary mantissa
+        e_shift = 0
+        while not (i_mant & COUNT_MASK):
+            i_mant <<= 1
+            e_shift += 1
+            if e_shift == 10:
+                i_exp = 1023
+                e_shift = 0
+                i_mant = 0
+                break
+        i_exp -= e_shift
+
+        # Construct IEEE 754 double-precision values
+        c_r = ((c & R_SIGN_MASK) << 34) | ((r_mant & MANT_MASK) << 42) | (r_exp << 52)
+        c_i = ((c & I_SIGN_MASK) << 46) | ((i_mant & MANT_MASK) << 42) | (i_exp << 52)
+
+        # Convert to Python floats
+        real = struct.unpack("d", struct.pack("Q", c_r))[0]
+        imag = struct.unpack("d", struct.pack("Q", c_i))[0]
+        out.csi_r.append(real)
+        out.csi_i.append(imag)
+
+    # Check for new CSI data
     new_csi = False
     for ch_it in channel_current:
         if ch_it.tx * 4 + ch_it.rx == out.tx * 4 + out.rx:
