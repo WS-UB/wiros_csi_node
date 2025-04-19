@@ -7,6 +7,7 @@ import time
 import datetime
 import signal
 import sys
+import numpy as np
 import random
 import string
 import ast
@@ -120,7 +121,7 @@ address = "128.205.218.189"
 mqtt_port = 1883
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
 CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
-topic = "/csi-ap3"
+topic = "/csi-ap1"
 
 
 def connect_mqtt():
@@ -309,12 +310,6 @@ def reload_router() -> str:
     return sh_exec_block(configcmd)
 
 
-def ifconfig() -> str:
-    configcmd = f"sudo ifconfig eth0 {rx_ip} netmask 255.255.255.0"
-    print(configcmd)
-    return sh_exec_block(configcmd)
-
-
 # Parse CSI data
 def parse_csi(data: bytes, nbytes: int):
     global channel_current, last_seq
@@ -357,6 +352,7 @@ def parse_csi(data: bytes, nbytes: int):
         print(f"Invalid Bandwidth received {out.bw}")
         return
 
+    NFFT = out.bw * 3.2
     n_sub = int(out.bw * 3.2)
     out.n_sub = n_sub
     print(out.n_sub)
@@ -369,8 +365,9 @@ def parse_csi(data: bytes, nbytes: int):
 
     n_rx = 4  # Number of RX antennas
     csi = struct.unpack(f"<{n_sub*4 * 4}I", data[18 : 18 + n_sub * n_rx * 4 * 4])
+    # csi = np.concatenate((csi[len(csi)//2:], csi[:len(csi)//2]), axis = 0)
 
-    print(csi)
+    # print(data[18 : 18 + n_sub * n_rx * 4 * 4])
 
     for i in range(n_sub * 4 * 4):
         out.csi_r[i] = float(csi[i] & 0xFFFF)  # Simplified CSI decoding

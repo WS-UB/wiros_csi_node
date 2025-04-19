@@ -2,7 +2,7 @@
   "login": [
     {
       "host": "wiloc",
-      "host_ip": "192.168.48.3",
+      "host_ip": "192.168.48.1",
       "host_passwd": "robot_wireless"
     }
   ],
@@ -16,10 +16,10 @@
 
   "packet_params": [
     {
-      "use_software_mac_filter": "true",
+      "use_software_mac_filter": "false",
       "mac_filter": "[0x20, 0xf0, 0x94, 0x2a, 0x7d, 0x47]",
-      "length": 6,
-      "beacon_rate": 200.0,
+      "length": 1,
+      "beacon_rate": 0.0,
       "beacon_tx_nss": 4
     }
   ],
@@ -32,12 +32,12 @@
 
   "aoa_info": [
     {
-      "AP_lat": 0.0,
-      "AP_long": 0.0,
-      "lat1": 0.0,
-      "long1": 0.0,
-      "lat2": 0.0,
-      "long2": 0.0
+      "AP_lat": 43.002879692437574,
+      "AP_long": -78.78684915216567,
+      "lat1": 43.002873678011866,
+      "long1": -78.78684976826462,
+      "lat2": 43.00288469300841,
+      "long2": -78.78684921418215
     }
   ]
 }
