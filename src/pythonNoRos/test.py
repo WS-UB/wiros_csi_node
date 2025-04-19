@@ -327,7 +327,7 @@ def parse_csi(data: bytes, nbytes: int):
     out.n_sub = n_sub
     
     # Calculate expected CSI data size (4x4 MIMO)
-    expected_csi_size = n_sub * 4 * 4 * 4  # 4 bytes per int32, 4x4 MIMO
+    expected_csi_size = n_sub * 4
     if len(data) < 18 + expected_csi_size:
         print(f"CSI data too small: {len(data)-18} bytes, expected {expected_csi_size}")
         return
@@ -353,31 +353,54 @@ def parse_csi(data: bytes, nbytes: int):
     last_seq = out.seq
     channel_current.append(out)
 
+def build_csi_matrix(csi_list: List[CsiInstance]) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Build a (n_sub, 4, 4) complex matrix from a list of CsiInstance
+    """
+    n_sub = csi_list[0].n_sub
+    csi_r = np.zeros((n_sub, 4, 4))
+    csi_i = np.zeros((n_sub, 4, 4))
+
+    for csi in csi_list:
+        csi_r[:, csi.tx, csi.rx] = csi.csi_r
+        csi_i[:, csi.tx, csi.rx] = csi.csi_i
+
+    return csi_r.flatten().tolist(), csi_i.flatten().tolist()
+
 def publish_csi(channel_current: List[CsiInstance]):
-    print(f"Publishing CSI data for {len(channel_current)} channels...")
-    for csi in channel_current:
-        # Create a dictionary with all CSI data
-        csi_data = {
-            "mac": ":".join(f"{x:02x}" for x in csi.source_mac),
-            "rssi": csi.rssi,
-            "channel": csi.channel,
-            "bw": csi.bw,
-            "n_sub": csi.n_sub,
-            "tx": csi.tx,
-            "rx": csi.rx,
-            "n_rows": csi.n_rows,
-            "n_cols": csi.n_cols,
-            "ap_id": csi.ap_id,
-            "mcs": csi.mcs,
-            "rx_id": csi.rx_id,
-            "stamp": csi.stamp.isoformat(),
-            "complex_csi": [f"{x.real}+{x.imag}j" for x in csi.complex_csi] if csi.complex_csi is not None else None
-        }
-        
-        # Convert to JSON and publish
-        msg = json.dumps(csi_data)
-        CLIENT.publish(topic, msg)
-        print(f"Published CSI data for MAC: {csi_data['mac']}, RSSI: {csi.rssi}")
+    if len(channel_current) < 16:
+        print(f"Not enough CSI streams yet: {len(channel_current)}")
+        return
+
+    print(f"Publishing full CSI matrix from {len(channel_current)} streams...")
+
+    # Build matrix and flatten
+    csi_r_flat, csi_i_flat = build_csi_matrix(channel_current)
+
+    # Use metadata from the first stream
+    meta = channel_current[0]
+
+    # Create a dictionary with all CSI data
+    csi_data = {
+        "mac": ":".join(f"{x:02x}" for x in meta.source_mac),
+        "rssi": meta.rssi,
+        "channel": meta.channel,
+        "bw": meta.bw,
+        "n_sub": meta.n_sub,
+        "n_rows": meta.n_rows,
+        "n_cols": meta.n_cols,
+        "ap_id": meta.ap_id,
+        "mcs": meta.mcs,
+        "rx_id": meta.rx_id,
+        "stamp": meta.stamp.isoformat(),
+        "csi_r": csi_r_flat,
+        "csi_i": csi_i_flat
+    }
+
+    # Convert to JSON and publish
+    msg = json.dumps(csi_data)
+    CLIENT.publish(topic, msg)
+    print(f"Published full CSI matrix for MAC: {csi_data['mac']}, RSSI: {meta.rssi}")
 
 def main():
     global rx_ip, rx_pass, rx_host, ch, bw, beacon, tx_nss, iface, filter, use_tcp, no_config, lock_topic
