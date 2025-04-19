@@ -44,13 +44,14 @@ csi_i_out = None
 csi_size = 0
 
 # Define masks (based on C++ code)
-E_MASK = 0x3F              # 6-bit exponent (bits [0:5])
-R_MANT_MASK = 0x1FFC0000   # Real mantissa (bits [18:28])
-I_MANT_MASK = 0x00007FC0   # Imag mantissa (bits [6:16])
-R_SIGN_MASK = 0x20000000   # Real sign (bit 29)
-I_SIGN_MASK = 0x00020000   # Imag sign (bit 17)
-COUNT_MASK = 0x400         # For mantissa normalization check (bit 10)
-MANT_MASK = 0x3FF          # Lower 10 bits of mantissa
+E_MASK = 0x3F  # 6-bit exponent (bits [0:5])
+R_MANT_MASK = 0x1FFC0000  # Real mantissa (bits [18:28])
+I_MANT_MASK = 0x00007FC0  # Imag mantissa (bits [6:16])
+R_SIGN_MASK = 0x20000000  # Real sign (bit 29)
+I_SIGN_MASK = 0x00020000  # Imag sign (bit 17)
+COUNT_MASK = 0x400  # For mantissa normalization check (bit 10)
+MANT_MASK = 0x3FF  # Lower 10 bits of mantissa
+
 
 def decode_csi(csi_data, n_sub):
     csi = struct.unpack(f"<{n_sub}I", csi_data)
@@ -101,6 +102,7 @@ def decode_csi(csi_data, n_sub):
 
     return csi_r_buf, csi_i_buf
 
+
 def string_to_bool(string):
     string = string.lower()
     if string == "true":
@@ -110,12 +112,14 @@ def string_to_bool(string):
     else:
         raise ValueError("Invalid input: string must be 'true' or 'false'")
 
+
 # MQTT Configuration
 address = "128.205.218.189"
 mqtt_port = 1883
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
 CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
 topic = "/csi-ap3"
+
 
 def connect_mqtt():
     def on_connect(client, userdata, flags, rc):
@@ -129,15 +133,17 @@ def connect_mqtt():
     client.connect(address, mqtt_port)
     return client
 
+
 class MacFilter:
     def __init__(self, mac: List[int], length: int):
         self.mac = mac
         self.len = length
-        
+
     def matches(self, other_mac: List[int]) -> bool:
         if self.len == 0:
             return True
-        return self.mac[:self.len] == other_mac[:self.len]
+        return self.mac[: self.len] == other_mac[: self.len]
+
 
 class CsiInstance:
     def __init__(self):
@@ -161,6 +167,7 @@ class CsiInstance:
         self.stamp = None
         self.complex_csi = None  # Added for MATLAB-like complex representation
 
+
 class CsiUdpFrame:
     def __init__(self):
         self.kk1 = 0
@@ -173,10 +180,11 @@ class CsiUdpFrame:
         self.chanspec = 0
         self.chip = 0
 
+
 # Load configuration
 with open("config.json", "r") as file:
     config_data = json.load(file)
-    
+
     rx_ip = config_data["login"][0]["host_ip"]
     rx_host = config_data["login"][0]["host"]
     rx_pass = config_data["login"][0]["host_passwd"]
@@ -195,7 +203,15 @@ with open("config.json", "r") as file:
     mac_filter = ast.literal_eval(config_data["packet_params"][0]["mac_filter"])
     length = int(config_data["packet_params"][0]["length"])
 
+    AP_LAT = float(config_data["aoa_info"][0]["AP_lat"])
+    AP_LONG = float(config_data["aoa_info"][0]["AP_long"])
+    AP_LAT1 = float(config_data["aoa_info"][0]["lat1"])
+    AP_LONG1 = float(config_data["aoa_info"][0]["long1"])
+    AP_LAT2 = float(config_data["aoa_info"][0]["lat2"])
+    AP_LONG2 = float(config_data["aoa_info"][0]["long2"])
+
     filter = MacFilter(mac_filter, length)
+
 
 def sh_exec_block(cmd: str) -> str:
     try:
@@ -212,9 +228,11 @@ def sh_exec_block(cmd: str) -> str:
         print("Process Timeout")
         return ""
 
+
 def handle_shutdown(sig, frame):
     print("Shutting down.")
     sys.exit(0)
+
 
 def set_chanspec(s_chan: int, s_bw: int) -> bool:
     global ch, bw
@@ -228,6 +246,7 @@ def set_chanspec(s_chan: int, s_bw: int) -> bool:
         print(f"Setting BW to {bw}")
     return False
 
+
 def set_mac_filter(filt: MacFilter) -> bool:
     global filter, use_software_mac_filter
     if filt.len < 0 or filt.len > 6:
@@ -237,6 +256,7 @@ def set_mac_filter(filt: MacFilter) -> bool:
     if filt.len == 2:
         use_software_mac_filter = False
     return False
+
 
 def reconfigure() -> str:
     global iface, tx_nss
@@ -251,9 +271,10 @@ def reconfigure() -> str:
         configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/setup.sh {ch} {bw} 4 {filter.mac[0]:02x}:{filter.mac[1]:02x}:{filter.mac[2]:02x}:{filter.mac[3]:02x}:{filter.mac[4]:02x}:{filter.mac[5]:02x} 2>&1"
     else:
         configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/setup.sh {ch} {bw} 4 2>&1"
-    
+
     print(configcmd)
     return sh_exec_block(configcmd)
+
 
 def reconnect() -> str:
     global iface, tx_nss
@@ -268,18 +289,20 @@ def reconnect() -> str:
         configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/configcsi.sh {ch} {bw} 4 {filter.mac[0]:02x}:{filter.mac[1]:02x}:{filter.mac[2]:02x}:{filter.mac[3]:02x}:{filter.mac[4]:02x}:{filter.mac[5]:02x} 2>&1"
     else:
         configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/configcsi.sh {ch} {bw} 4 2>&1"
-    
+
     print(configcmd)
     return sh_exec_block(configcmd)
+
 
 def reload_router() -> str:
     configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/reload.sh 2>&1"
     print(configcmd)
     return sh_exec_block(configcmd)
 
+
 def parse_csi(data: bytes, nbytes: int):
     global channel_current, last_seq
-    
+
     if nbytes < 18:
         print(f"Packet too small: {nbytes} bytes")
         return
@@ -325,7 +348,7 @@ def parse_csi(data: bytes, nbytes: int):
 
     n_sub = int(out.bw * 3.2)
     out.n_sub = n_sub
-    
+
     # Calculate expected CSI data size (4x4 MIMO)
     expected_csi_size = n_sub * 4
     if len(data) < 18 + expected_csi_size:
@@ -333,11 +356,11 @@ def parse_csi(data: bytes, nbytes: int):
         return
 
     # Decode CSI data
-    out.csi_r, out.csi_i = decode_csi(data[18:18+expected_csi_size], n_sub)
-    
+    out.csi_r, out.csi_i = decode_csi(data[18 : 18 + expected_csi_size], n_sub)
+
     # Create complex CSI representation (similar to MATLAB)
     out.complex_csi = np.array(out.csi_r) + 1j * np.array(out.csi_i)
-    
+
     # Check for new CSI data
     new_csi = False
     for ch_it in channel_current:
@@ -353,6 +376,7 @@ def parse_csi(data: bytes, nbytes: int):
     last_seq = out.seq
     channel_current.append(out)
 
+
 def build_csi_matrix(csi_list: List[CsiInstance]) -> Tuple[np.ndarray, np.ndarray]:
     """
     Build a (n_sub, 4, 4) complex matrix from a list of CsiInstance
@@ -366,6 +390,7 @@ def build_csi_matrix(csi_list: List[CsiInstance]) -> Tuple[np.ndarray, np.ndarra
         csi_i[:, csi.tx, csi.rx] = csi.csi_i
 
     return csi_r.flatten().tolist(), csi_i.flatten().tolist()
+
 
 def publish_csi(channel_current: List[CsiInstance]):
     if len(channel_current) < 16:
@@ -394,13 +419,17 @@ def publish_csi(channel_current: List[CsiInstance]):
         "rx_id": meta.rx_id,
         "stamp": meta.stamp.isoformat(),
         "csi_r": csi_r_flat,
-        "csi_i": csi_i_flat
+        "csi_i": csi_i_flat,
     }
+    fc = 0
+
+    msg = f"MAC: {meta.source_mac}, RSSI: {meta.rssi}, Channel: {meta.channel}, BW: {meta.bw}, csi_i: {csi_i_flat}, csi_r: {csi_r_flat}, fc: {fc}, n_sub: {meta.n_sub}, tx: {4}, n_rows: {meta.n_rows}, n_cols:{meta.n_cols}, ap_id: {meta.ap_id}, mcs: {meta.mcs}, rx_id: {meta.rx_id}, stamp;{meta.stamp}, AP_location: {[AP_LAT, AP_LONG]}, AP_L1: {[AP_LAT1, AP_LONG1]}, AP_L2: {[AP_LAT2, AP_LONG2]}"
 
     # Convert to JSON and publish
-    msg = json.dumps(csi_data)
+    # msg = json.dumps(csi_data)
     CLIENT.publish(topic, msg)
     print(f"Published full CSI matrix for MAC: {csi_data['mac']}, RSSI: {meta.rssi}")
+
 
 def main():
     global rx_ip, rx_pass, rx_host, ch, bw, beacon, tx_nss, iface, filter, use_tcp, no_config, lock_topic
@@ -437,6 +466,7 @@ def main():
         except Exception as e:
             print(f"Socket Error: {e}")
             continue
+
 
 if __name__ == "__main__":
     CLIENT = connect_mqtt()
