@@ -2,7 +2,7 @@
   "login": [
     {
       "host": "wiloc",
-      "host_ip": "192.168.48.1",
+      "host_ip": "192.168.48.2",
       "host_passwd": "robot_wireless"
     }
   ],
@@ -16,9 +16,9 @@
 
   "packet_params": [
     {
-      "use_software_mac_filter": "false",
+      "use_software_mac_filter": "true",
       "mac_filter": "[0x20, 0xf0, 0x94, 0x2a, 0x7d, 0x47]",
-      "length": 1,
+      "length": 6,
       "beacon_rate": 0.0,
       "beacon_tx_nss": 4
     }
