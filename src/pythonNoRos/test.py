@@ -451,7 +451,7 @@ def main():
 
     print("Starting CSI collection")
     sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sockfd.settimeout(10.0)
+    sockfd.settimeout(15.0)
     sockfd.bind(("0.0.0.0", PORT))
 
     while True:
@@ -467,7 +467,7 @@ def main():
             reconnect()
             print("Starting CSI collection")
             sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sockfd.settimeout(10.0)
+            sockfd.settimeout(15.0)
             sockfd.bind(("0.0.0.0", PORT))
             continue
         except Exception as e:
