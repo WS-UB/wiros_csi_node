@@ -118,7 +118,7 @@ address = "128.205.218.189"
 mqtt_port = 1883
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
 CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
-topic = "/csi-ap3"
+topic = "/csi-ap2"
 
 
 def connect_mqtt():
@@ -223,10 +223,12 @@ def sh_exec_block(cmd: str) -> str:
             text=True,
             timeout=10,
         )
-        return result.stdout
     except subprocess.TimeoutExpired:
         print("Process Timeout")
-        return ""
+        print("Retrying...")
+        return
+    print(result.stdout)
+    return result.stdout
 
 
 def handle_shutdown(sig, frame):
@@ -296,6 +298,11 @@ def reconnect() -> str:
 
 def reload_router() -> str:
     configcmd = f"sshpass -p {rx_pass} ssh -o strictHostKeyChecking=no {rx_host}@{rx_ip} /jffs/csi/reload.sh 2>&1"
+    print(configcmd)
+    return sh_exec_block(configcmd)
+    
+def ifconfig() -> str:
+    configcmd = f"sudo ifconfig eth0 192.168.48.100 netmask 255.255.255.0"
     print(configcmd)
     return sh_exec_block(configcmd)
 
@@ -444,7 +451,7 @@ def main():
 
     print("Starting CSI collection")
     sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sockfd.settimeout(1.0)
+    sockfd.settimeout(15.0)
     sockfd.bind(("0.0.0.0", PORT))
 
     while True:
@@ -453,14 +460,14 @@ def main():
             if data:
                 parse_csi(data, len(data))
         except socket.timeout:
+            ifconfig()
             print("Socket Timeout")
             reload_router()
             print("Reloading Router...")
-            time.sleep(3)
             reconnect()
             print("Starting CSI collection")
             sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sockfd.settimeout(1.0)
+            sockfd.settimeout(15.0)
             sockfd.bind(("0.0.0.0", PORT))
             continue
         except Exception as e:
