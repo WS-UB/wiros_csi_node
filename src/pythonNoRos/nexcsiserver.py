@@ -1,9 +1,8 @@
 import socket
 import struct
 import subprocess
-import re
+import os
 import json
-import time
 import datetime
 import signal
 import sys
@@ -11,7 +10,7 @@ import random
 import string
 import ast
 from paho.mqtt import client as mqtt_client
-import time
+from dotenv import load_dotenv
 from typing import List, Tuple
 import numpy as np
 
@@ -114,8 +113,9 @@ def string_to_bool(string):
 
 
 # MQTT Configuration
-address = "128.205.218.189"
-mqtt_port = 1883
+load_dotenv()
+address = os.getenv("MQTT_ENDPOINT")
+mqtt_port = os.getenv("MQTT_PORT")
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
 CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
 topic = "/csi-ap2"
