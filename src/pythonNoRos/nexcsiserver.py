@@ -115,7 +115,7 @@ def string_to_bool(string):
 # MQTT Configuration
 load_dotenv()
 address = os.getenv("MQTT_ENDPOINT")
-mqtt_port = os.getenv("MQTT_PORT")
+mqtt_port = int(os.getenv("MQTT_PORT"))
 client_id = "".join(random.choices((string.ascii_letters + string.digits), k=6))
 CLIENT = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, "client")
 topic = "/csi-ap2"
