@@ -1,2 +1,5 @@
 .idea/
 cmake_build_debug/
+__pycache__/
+*.pyc
+.env

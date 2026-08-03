@@ -1,0 +1,17 @@
+[Unit]
+Description=WiROS CSI relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wiloc
+WorkingDirectory=/opt/wiros_csi_node
+EnvironmentFile=-/etc/wiros-csi-node.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/wiros_csi_node/.venv/bin/python src/pythonNoRos/nexcsiserver.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

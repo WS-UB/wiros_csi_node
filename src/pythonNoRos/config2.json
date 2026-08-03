@@ -1,15 +1,15 @@
 {
   "router": {
-    "id": "router-1",
-    "host": "192.168.48.6",
+    "id": "router-2",
+    "host": "192.168.48.5",
     "username": "wiloc",
     "password": "robot_wireless"
   },
   "receiver": {
-    "id": "rpi-1",
+    "id": "rpi-2",
     "bind": "0.0.0.0",
     "port": 5500,
-    "ethernet_address": "192.168.48.20/24",
+    "ethernet_address": "192.168.48.100/24",
     "receive_buffer_bytes": 4194304
   },
   "capture": {
@@ -19,7 +19,7 @@
     "mac_filter": "94:45:60:ba:11:da"
   },
   "mqtt": {
-    "host": "192.168.48.10",
+    "host": "192.168.48.11",
     "port": 1883,
     "topic": "/csi",
     "qos": 0,
