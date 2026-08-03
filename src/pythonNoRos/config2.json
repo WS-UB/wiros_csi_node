@@ -3,7 +3,7 @@
     "id": "router-2",
     "host": "192.168.48.5",
     "username": "wiloc",
-    "password": "robot_wireless"
+    "password": ""
   },
   "receiver": {
     "id": "rpi-2",
