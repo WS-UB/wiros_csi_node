@@ -1,0 +1,46 @@
+import os
+import sys
+
+import paramiko
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+TARGETS = [
+    ("router-2", "100.103.185.11", "192.168.48.5", 60, 80),
+    ("router-1", "100.95.115.44", "192.168.48.6", 60, 80),
+]
+
+password = os.environ["WIRES_PI_PASSWORD"]
+
+for label, pi_host, router_host, channel, bandwidth in TARGETS:
+    print(f"=== {label}: {router_host} through {pi_host} ===")
+    pi = paramiko.SSHClient()
+    pi.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    router = paramiko.SSHClient()
+    router.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        pi.connect(pi_host, username="wiloc", password=password, timeout=10)
+        tunnel = pi.get_transport().open_channel(
+            "direct-tcpip", (router_host, 22), ("127.0.0.1", 0)
+        )
+        router.connect(
+            router_host,
+            username="wiloc",
+            password=password,
+            sock=tunnel,
+            timeout=10,
+        )
+        command = (
+            f"/jffs/csi/setup.sh {channel} {bandwidth} "
+            "4 94:45:60:ba:11:da 2>&1"
+        )
+        _, stdout, stderr = router.exec_command(command, timeout=60)
+        print(stdout.read().decode(errors="replace"))
+        error = stderr.read().decode(errors="replace")
+        if error:
+            print(error)
+    except Exception as exc:
+        print(f"{type(exc).__name__}: {exc}")
+    finally:
+        router.close()
+        pi.close()

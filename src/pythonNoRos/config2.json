@@ -14,7 +14,7 @@
   },
   "capture": {
     "channel": 60,
-    "bandwidth_mhz": 40,
+    "bandwidth_mhz": 80,
     "tx_streams": 4,
     "mac_filter": "94:45:60:ba:11:da"
   },

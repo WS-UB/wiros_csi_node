@@ -5,6 +5,7 @@ import os
 import socket
 import struct
 import subprocess
+import time
 from pathlib import Path
 
 from paho.mqtt import client as mqtt
@@ -180,11 +181,15 @@ def run(config):
     publish_timeout = float(
         config["mqtt"].get("publish_timeout_seconds", 10)
     )
-    current_key = None
-    current_streams = {}
+    pending_streams = {}
+    datagram_count = 0
+    accepted_stream_count = 0
+    completed_matrix_count = 0
+    last_stats_at = time.monotonic()
     try:
         while True:
             data, source = sock.recvfrom(16384)
+            datagram_count += 1
             try:
                 payload = parse_frame(
                     data, receiver["id"], config["router"]["id"]
@@ -201,17 +206,18 @@ def run(config):
             mac_filter = config["capture"].get("mac_filter", "").lower()
             if mac_filter and payload["source_mac"].lower() != mac_filter:
                 continue
+            accepted_stream_count += 1
             key = (payload["source_mac"], payload["sequence"])
-            if key != current_key:
-                current_key = key
-                current_streams = {}
+            streams = pending_streams.setdefault(key, {})
             stream_key = (payload["tx"], payload["rx"])
-            current_streams[stream_key] = payload
-            if len(current_streams) < STREAM_COUNT:
+            streams[stream_key] = payload
+            if len(streams) < STREAM_COUNT:
+                while len(pending_streams) > 128:
+                    pending_streams.pop(next(iter(pending_streams)))
                 continue
-            payload = assemble_csi_matrix(current_streams)
-            current_key = None
-            current_streams = {}
+            payload = assemble_csi_matrix(streams)
+            del pending_streams[key]
+            completed_matrix_count += 1
             result = client.publish(topic, json.dumps(payload), qos=qos)
             if result.rc == mqtt.MQTT_ERR_QUEUE_SIZE:
                 LOG.warning("discarding CSI frame because the MQTT queue is full")
@@ -225,6 +231,19 @@ def run(config):
                         "MQTT publish timed out after "
                         f"{publish_timeout:g} seconds"
                     )
+            now = time.monotonic()
+            if now - last_stats_at >= 10:
+                LOG.info(
+                    "CSI stats datagrams=%s accepted_streams=%s matrices=%s pending=%s",
+                    datagram_count,
+                    accepted_stream_count,
+                    completed_matrix_count,
+                    len(pending_streams),
+                )
+                datagram_count = 0
+                accepted_stream_count = 0
+                completed_matrix_count = 0
+                last_stats_at = now
     finally:
         sock.close()
         client.loop_stop()

@@ -55,10 +55,10 @@ chspec=$(/usr/sbin/wl -i ${IFACE} chanspec ${CH}/${BW} | tr ' ' '\n' | grep "0x"
 echo ${SS_hx}
 
 if [ "$use_mac" = "False" ]; then
-  CONFIG=$(./makecsiparams -e 1 -c ${CH}/${BW} -C 0xf -N 0x${SS_hx} -d 0x50)
+  CONFIG=$(./makecsiparams -e 1 -c ${CH}/${BW} -C 0xf -N 0x${SS_hx} -d 10)
 else
   #dhd.ko has been modified such that only the first two bytes of MAC addresses are compared in the filter
-  CONFIG=$(./makecsiparams -e 1 -m ${MAC} -c ${CH}/${BW} -C 0xf -N 0x${SS_hx} -d 0x50)
+  CONFIG=$(./makecsiparams -e 1 -m ${MAC} -c ${CH}/${BW} -C 0xf -N 0x${SS_hx} -d 10)
 fi
 LEN=38
 ./nexutil -I ${IFACE} -s500 -b -l${LEN} -v ${CONFIG} 
