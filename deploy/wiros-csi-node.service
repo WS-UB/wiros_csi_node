@@ -9,9 +9,11 @@ User=wiloc
 WorkingDirectory=/opt/wiros_csi_node
 EnvironmentFile=-/etc/wiros-csi-node.env
 Environment=PYTHONUNBUFFERED=1
+UnsetEnvironment=MQTT_HOST MQTT_PORT
+RestrictAddressFamilies=AF_INET AF_INET6
 ExecStart=/opt/wiros_csi_node/.venv/bin/python src/pythonNoRos/nexcsiserver.py
 Restart=on-failure
-RestartSec=30
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

@@ -137,6 +137,7 @@ def connect_mqtt(config):
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
         client_id=config["receiver"]["id"],
+        transport=mqtt_config.get("transport", "tcp"),
     )
     client.max_queued_messages_set(
         int(mqtt_config.get("max_queued_messages", 1000))
@@ -148,6 +149,12 @@ def connect_mqtt(config):
     previous_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(connect_timeout)
     try:
+        LOG.info(
+            "connecting to MQTT broker host=%r port=%r transport=%r",
+            mqtt_config["host"],
+            mqtt_config["port"],
+            mqtt_config.get("transport", "tcp"),
+        )
         client.connect(mqtt_config["host"], mqtt_config["port"])
     finally:
         socket.setdefaulttimeout(previous_timeout)
@@ -270,5 +277,5 @@ if __name__ == "__main__":
     try:
         main()
     except (OSError, RuntimeError) as error:
-        LOG.error("receiver stopped: %s", error)
+        LOG.exception("receiver stopped: %s", error)
         raise SystemExit(1) from error
