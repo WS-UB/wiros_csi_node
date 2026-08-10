@@ -46,9 +46,16 @@ fi
 /usr/sbin/wl -i ${IFACE} up
 /usr/sbin/wl -i ${IFACE} radio on
 /usr/sbin/wl -i ${IFACE} country UG
+# CSI matrices use all four receive chains. Some idle radios fall back to a
+# single runtime chain even though NVRAM still advertises four.
+/usr/sbin/wl -i ${IFACE} rxchain 0xf
 chspec=$(/usr/sbin/wl -i ${IFACE} chanspec ${CH}/${BW} | tr ' ' '\n' | grep "0x" | tr -d '\n')
 /usr/sbin/wl -i ${IFACE} monitor 1
 /sbin/ifconfig ${IFACE} up
+# Passive CSI routers must not keep an AP BSS active on the capture radio.
+# Leaving it up makes the driver service the AP and capture off-air frames in
+# sparse bursts instead of continuously.
+/usr/sbin/wl -i ${IFACE} bss down
 
 
 #change -N to have more spatial streams
