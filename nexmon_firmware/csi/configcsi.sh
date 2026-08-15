@@ -3,6 +3,9 @@ CH=$1
 BW=$2
 SS=$3
 MAC=$4
+BRIDGE=${CSI_BRIDGE:-br0}
+BRIDGE_INTERFACES=${CSI_BRIDGE_INTERFACES:-"eth6 eth5"}
+BRCTL=${CSI_BRCTL:-brctl}
 cd "$(dirname "$0")"
 
 if [ "$SS" = "" ]; then
@@ -56,6 +59,13 @@ chspec=$(/usr/sbin/wl -i ${IFACE} chanspec ${CH}/${BW} | tr ' ' '\n' | grep "0x"
 # Leaving it up makes the driver service the AP and capture off-air frames in
 # sparse bursts instead of continuously.
 /usr/sbin/wl -i ${IFACE} bss down
+
+# Bringing the passive BSS down can detach the radio interfaces after a fresh
+# driver load. Reattach them after configuration so CSI UDP broadcasts still
+# reach the paired RPi over the Ethernet bridge.
+for bridge_interface in $BRIDGE_INTERFACES; do
+  "$BRCTL" addif "$BRIDGE" "$bridge_interface" 2>/dev/null || true
+done
 
 
 #change -N to have more spatial streams

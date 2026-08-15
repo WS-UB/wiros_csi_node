@@ -1,0 +1,17 @@
+[Unit]
+Description=Late AP+CSI driver watchdog
+Wants=network-online.target
+After=NetworkManager.service network-online.target
+
+[Service]
+Type=simple
+User=wiloc
+Group=wiloc
+EnvironmentFile=-/etc/default/ap-csi-rpi-watchdog
+ExecStart=/usr/local/sbin/ap-csi-rpi-watchdog
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
