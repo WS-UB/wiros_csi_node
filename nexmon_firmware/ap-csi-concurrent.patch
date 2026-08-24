@@ -1,8 +1,28 @@
+diff --git a/Makefile b/Makefile
+index bdc60ab..3fdf29a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -210,7 +210,15 @@ gen/ucode.asm: $(FW_PATH)/ucode.bin
+ endif
+ 	@printf "\033[0;31m  DISASSEMBLING UCODE\033[0m %s => %s\n" $< $@
+ 	$(Q)$(NEXMON_ROOT)/buildtools/$(B43VERSION)/disassembler/b43-dasm $< $@ --arch 15 --format raw-le32 2>log/disass.log
++
++# The BCM4366 CSI patch is maintained against the deterministic raw
++# disassembly. Beautifying it replaces register operands with aliases whose
++# output varies with the installed b43 definition files and makes patch
++# application silently reject hunks (the historical rule ignores patch's
++# status). Other targets retain their existing beautified source.
++ifeq ($(findstring bcm4366c0,$(FWUCODE)), )
+ 	$(Q)$(NEXMON_ROOT)/buildtools/$(B43VERSION)/debug/b43-beautifier --asmfile $@ --defs $(NEXMON_ROOT)/buildtools/$(B43VERSION)/debug/include > tmp && mv tmp $@
++endif
+ 
+ src/$(UCODEFILE:.patch=.asm): src/$(UCODEFILE) gen/ucode.asm
+ 	@printf "\033[0;31m  PATCHING UCODE\033[0m %s => %s\n" $< $@
 diff --git a/src/csi.ucode.bcm4366c0.10_10_122_20.patch b/src/csi.ucode.bcm4366c0.10_10_122_20.patch
-index b8db7b4..04fe6a3 100644
+index b8db7b4..c18f826 100644
 --- a/src/csi.ucode.bcm4366c0.10_10_122_20.patch
 +++ b/src/csi.ucode.bcm4366c0.10_10_122_20.patch
-@@ -1,20 +1,4 @@
+@@ -1,20 +1,24 @@
 -5a6,73
 -> #define	READVAL(offset)                                 \
 -> 	mov	0xf, r33                                        \
@@ -19,47 +39,106 @@ index b8db7b4..04fe6a3 100644
 -> table_loop4:                                            \
 -> 	jnzxh	SPR_Ext_IHR_Status & 32768, table_loop4-    \
 -> 	or	SPR_Ext_IHR_Data, 0x0, [1,offset]
--> 
-+5a6,57
++0a1,4
++> #include "/nexmon/buildtools/b43-v2/debug/include/spr.inc"
++> #include "/nexmon/buildtools/b43-v2/debug/include/shm.inc"
++> #include "/nexmon/buildtools/b43-v2/debug/include/cond.inc"
+ > 
++5a10,82
++> #define READVAL(offset)                                      \
++> 	mov 0xf, r33                                           \
++> table_loop1:                                                 \
++> 	jnzxh SPR_Ext_IHR_Status & 32768, table_loop1-          \
++> 	@102 @17A1, @1800, @102F                               \
++> table_loop2:                                                 \
++> 	jnzxh SPR_Ext_IHR_Status & 32768, table_loop2-          \
++> 	or SPR_Ext_IHR_Data, 0x0, [0,offset]                    \
++> 	mov 0x10, r33                                          \
++> table_loop3:                                                 \
++> 	jnzxh SPR_Ext_IHR_Status & 32768, table_loop3-          \
++> 	@102 @17A1, @1800, @102F                               \
++> table_loop4:                                                 \
++> 	jnzxh SPR_Ext_IHR_Status & 32768, table_loop4-          \
++> 	or SPR_Ext_IHR_Data, 0x0, [1,offset]
  > #define	MASK(cond)	(1 << (cond & 0xf))
  > #define NEED_BEACON			(MASK(COND_NEED_BEACON))
  > #define NEED_RESPONSEFR			(MASK(COND_NEED_RESPONSEFR))
-@@ -36,7 +20,8 @@
+@@ -36,26 +40,32 @@
  > #define		SPARE4		r56
  > #define		SPARE5		r55
  > #define		SPARE6		r52
 -> #define		DUMP_CSI    r54
-+> #define		DUMP_CSI    [SHM(0x1746)]
-+> #define		CSI_READY   [SHM(0x1748)]
++> #define		DUMP_CSI    [0xba3]
++> #define		CSI_READY   [0xba4]
++> #define		CSI_ACK     [0xba5]
++> #define		CSI_PENDING [0xba6]
++> #define		CSI_CORE    [0xba7]
++> #define		CSI_NSS     [0xba8]
++> #define		CSI_CHUNK   [0xba9]
  > 
- > #define		SHM_CSI_COLLECT		[SHM(0x1700)]
- > #define		NSSMASK				[SHM(0x1702)]
-@@ -51,7 +36,6 @@
+-> #define		SHM_CSI_COLLECT		[SHM(0x1700)]
+-> #define		NSSMASK				[SHM(0x1702)]
+-> #define		COREMASK			[SHM(0x1704)]
+-> #define		APPLY_PKT_FILTER	[SHM(0x1706)]
+-> #define		PKT_FILTER_BYTE		[SHM(0x1708)]
+-> #define		N_CMP_SRC_MAC		[SHM(0x170a)]
+-> #define		CMP_SRC_MAC_0_0		SHM(0x170c)
+-> #define		FORCEDEAF			[SHM(0x1724)]
+-> #define		CLEANDEAF			[SHM(0x1726)]
+-> #define		FIFODELAY			[SHM(0x1728)]
++> #define		SHM_CSI_COLLECT		[0xb80]
++> #define		NSSMASK				[0xb81]
++> #define		COREMASK			[0xb82]
++> #define		APPLY_PKT_FILTER	[0xb83]
++> #define		PKT_FILTER_BYTE		[0xb84]
++> #define		N_CMP_SRC_MAC		[0xb85]
++> #define		CMP_SRC_MAC_0_0		0xb86
++> #define		FORCEDEAF			[0xb92]
++> #define		CLEANDEAF			[0xb93]
++> #define		FIFODELAY			[0xb94]
  > 
- > #define		PHYSTATUS0		[SHM(0x1730)]
- > #define		RXCHAN			[SHM(0x1732)]
+-> #define		PHYSTATUS0		[SHM(0x1730)]
+-> #define		RXCHAN			[SHM(0x1732)]
 -> #define		OFF1SAFE		[SHM(0x1734)]
++> #define		PHYSTATUS0		[0xb98]
++> #define		RXCHAN			[0xb99]
++> #define		OFF1SAFE		[0xb9a]
  > 
- > #define		DEAFED			[SHM(0x1740)]
- > #define		RELIFED			[SHM(0x1742)]
-@@ -67,7 +51,7 @@
+-> #define		DEAFED			[SHM(0x1740)]
+-> #define		RELIFED			[SHM(0x1742)]
+-> #define		FILTEREDPKTS	[SHM(0x1744)]
++> #define		DEAFED			[0xba0]
++> #define		RELIFED			[0xba1]
++> #define		FILTEREDPKTS	[0xba2]
+ > 
+ > #define phy_reg_read(addr, target)		\
+ > 	mov	addr, r33						\
+@@ -67,27 +77,22 @@
  > 	mov	value, r34					\
  > 	calls	L44
  > 
 -56a125,134
-+56a161,170
- > 	xje	FORCEDEAF, 0, skipdeaf+
- > 	mov	0, FORCEDEAF
- > 	xadd	DEAFED, 1, DEAFED
-@@ -78,14 +62,14 @@
- > 	xadd	RELIFED, 1, RELIFED
- > 	calls	disable_carrier_search
- > skiprelife:
+-> 	xje	FORCEDEAF, 0, skipdeaf+
+-> 	mov	0, FORCEDEAF
+-> 	xadd	DEAFED, 1, DEAFED
+-> 	calls	enable_carrier_search
+-> skipdeaf:
+-> 	xje	CLEANDEAF, 0, skiprelife+
+-> 	mov	0, CLEANDEAF
+-> 	xadd	RELIFED, 1, RELIFED
+-> 	calls	disable_carrier_search
+-> skiprelife:
 -3367a3446
-+3367a3482
++57a135,139
++> 	xje	CSI_PENDING, 0, no_csi_pending+
++> 	mov	CSI_ACK, SPARE1
++> 	xjne	CSI_READY, SPARE1, no_csi_pending+
++> 	calls	csi_extract_chunk
++> no_csi_pending:
++3367a3450
  > 	mov	0, DUMP_CSI
 -3546a3626,3657
-+3546a3662,3693
++3546a3630,3677
  > #define		MAC_OFFSET	0x1028
 +> 	xje	SHM_CSI_COLLECT, 0, skip+
  > spin:
@@ -67,9 +146,47 @@ index b8db7b4..04fe6a3 100644
  > 	xjl	SPR_RXE_FRAMELEN, (6 + 24), spin-
 -> 	xje	SHM_CSI_COLLECT, 0, skip+
  > 	xje	APPLY_PKT_FILTER, 0, nopktfilt+
- > 	and	[SHM(MAC_OFFSET)], 0xff, SPARE1
+-> 	and	[SHM(MAC_OFFSET)], 0xff, SPARE1
++> 	and	[0x814], 0xff, SPARE1
  > 	xjne	SPARE1, PKT_FILTER_BYTE, skip+
-@@ -113,18 +97,11 @@
+ > nopktfilt:
+ > 	xje	N_CMP_SRC_MAC, 0, nomacfilter+
+@@ -97,14 +102,30 @@
+ > loopaddr:
+ > 	xje	SPARE2, 0, done+
+ > 	mov	[0,off5], SPARE1
+-> 	xjne	SPARE1, [SHM((MAC_OFFSET + 10))], nextaddr+
++> 	xjne	SPARE1, [0x819], nextaddr+
+ > 	mov	[1,off5], SPARE1
+-> 	xjne	SPARE1, [SHM((MAC_OFFSET + 12))], nextaddr+
++> 	xjne	SPARE1, [0x81a], nextaddr+
+ > 	mov	[2,off5], SPARE1
+-> 	xjne	SPARE1, [SHM((MAC_OFFSET + 14))], nextaddr+
++> 	xjne	SPARE1, [0x81b], nextaddr+
+ > 	xadd	FILTEREDPKTS, 1, FILTEREDPKTS
+ > nomacfilter:
+-> 	mov	1, DUMP_CSI
++> 	xjne	CSI_PENDING, 0, done+
++> 	mov	[0x870], PHYSTATUS0
++> 	mov	[0x879], RXCHAN
++> 	mov	[0x819], SPARE4
++> 	mov	SPARE4, [0xbac]
++> 	mov	[0x81a], SPARE4
++> 	mov	SPARE4, [0xbad]
++> 	mov	[0x81b], SPARE4
++> 	mov	SPARE4, [0xbae]
++> 	mov	[0x81f], SPARE4
++> 	mov	SPARE4, [0xbaf]
++> 	mov	RXCHAN, SPARE4
++> 	mov	SPARE4, [0xbb0]
++> 	mov	0, CSI_CORE
++> 	mov	0, CSI_NSS
++> 	mov	0, CSI_CHUNK
++> 	mov	1, CSI_PENDING
+ > 	jmp	done+
+ > nextaddr:
+ > 	xsub	SPARE2, 1, SPARE2
+@@ -113,34 +134,29 @@
  > done:
  > 	mov	SPARE6, SPR_BASE5
  > skip:
@@ -78,7 +195,7 @@ index b8db7b4..04fe6a3 100644
 -> 	mov	0xdead, [0x880]
 -> 	mov	0x86E, SPARE1
 -4243a4358,4453
-+4243a4341,4356
++4243a4375,4438
  > 	xje	DUMP_CSI, 0, dont_dump_csi
  > 	mov	[0x870], PHYSTATUS0
  > 	mov	[0x879], RXCHAN
@@ -86,32 +203,48 @@ index b8db7b4..04fe6a3 100644
 -> 	calls	enable_carrier_search
 -> 	mov	1, CLEANDEAF
 -> 	mov	SPR_BASE1, OFF1SAFE
- > 	mov	[SHM((MAC_OFFSET + 10))], SPARE4
- > 	mov	SPARE4, [SHM(0x1644)]
- > 	mov	[SHM((MAC_OFFSET + 12))], SPARE4
-@@ -135,92 +112,15 @@
- > 	mov	SPARE4, [SHM(0x164a)]
+-> 	mov	[SHM((MAC_OFFSET + 10))], SPARE4
+-> 	mov	SPARE4, [SHM(0x1644)]
+-> 	mov	[SHM((MAC_OFFSET + 12))], SPARE4
+-> 	mov	SPARE4, [SHM(0x1646)]
+-> 	mov	[SHM((MAC_OFFSET + 14))], SPARE4
+-> 	mov	SPARE4, [SHM(0x1648)]
+-> 	mov	[SHM((MAC_OFFSET + 22))], SPARE4
+-> 	mov	SPARE4, [SHM(0x164a)]
++> 	mov	[0x819], SPARE4
++> 	mov	SPARE4, [0xb22]
++> 	mov	[0x81a], SPARE4
++> 	mov	SPARE4, [0xb23]
++> 	mov	[0x81b], SPARE4
++> 	mov	SPARE4, [0xb24]
++> 	mov	[0x81f], SPARE4
++> 	mov	SPARE4, [0xb25]
  > 	mov	RXCHAN, SPARE4
- > 	mov	SPARE4, [SHM(0x164c)]
--> #define		ACPHY_TBL_ID_CORE0CHANESTTBL	73
--> #define		ACPHY_TBL_ID_CORE1CHANESTTBL	105
--> #define		ACPHY_TBL_ID_CORE2CHANESTTBL	137
--> #define		ACPHY_TBL_ID_CORE3CHANESTTBL	169
+-> 	mov	SPARE4, [SHM(0x164c)]
++> 	mov	SPARE4, [0xb26]
++> 	mov	1, CSI_PENDING
++> 	jext	0x7f, dont_dump_csi
++> csi_extract_chunk:
+ > #define		ACPHY_TBL_ID_CORE0CHANESTTBL	73
+ > #define		ACPHY_TBL_ID_CORE1CHANESTTBL	105
+ > #define		ACPHY_TBL_ID_CORE2CHANESTTBL	137
+ > #define		ACPHY_TBL_ID_CORE3CHANESTTBL	169
 -> 	mov	0, SPARE4		// core 0..3
 -> loop_core:
--> 	mov	ACPHY_TBL_ID_CORE0CHANESTTBL, SPARE5
--> 	xje	SPARE4, 0, table_set+
--> 	mov	ACPHY_TBL_ID_CORE1CHANESTTBL, SPARE5
--> 	xje	SPARE4, 1, table_set+
--> 	mov	ACPHY_TBL_ID_CORE2CHANESTTBL, SPARE5
--> 	xje	SPARE4, 2, table_set+
--> 	mov	ACPHY_TBL_ID_CORE3CHANESTTBL, SPARE5
--> table_set:
++> 	mov	CSI_CORE, SPARE4
+ > 	mov	ACPHY_TBL_ID_CORE0CHANESTTBL, SPARE5
+ > 	xje	SPARE4, 0, table_set+
+ > 	mov	ACPHY_TBL_ID_CORE1CHANESTTBL, SPARE5
+@@ -149,177 +165,67 @@
+ > 	xje	SPARE4, 2, table_set+
+ > 	mov	ACPHY_TBL_ID_CORE3CHANESTTBL, SPARE5
+ > table_set:
 -> 	mov	0, SPARE6		// NSSRX 0..3
 -> loop_nss:
--> 	mov	SPARE6, SPARE1
--> 	sl	SPARE1, 3, SPARE1
--> 	or	SPARE4, SPARE1, SPARE1
++> 	mov	CSI_NSS, SPARE6
+ > 	mov	SPARE6, SPARE1
+ > 	sl	SPARE1, 3, SPARE1
+ > 	or	SPARE4, SPARE1, SPARE1
 -> 	sl	SPARE1, 8, [SHM(0x1640)]
 -> 	sl	1, SPARE6, SPARE1
 -> 	and	SPARE1, NSSMASK, SPARE1
@@ -131,18 +264,30 @@ index b8db7b4..04fe6a3 100644
 -> chunk_set:
 -> 	mov	0x8000, SPARE1
 -> 	or	SPARE1, SPARE3, [SHM(0x1642)]
--> 	sl	SPARE6, 8, SPARE2
++> 	sl	SPARE1, 8, [0xbaa]
++> 	mov	CSI_CHUNK, [0xbab]
+ > 	sl	SPARE6, 8, SPARE2
 -> loop_main_csi:
--> 	phy_reg_write(0x00d, SPARE5)
--> 	phy_reg_write(0x00e, SPARE2)
++> 	mov	CSI_CHUNK, SPARE1
++> 	sl	SPARE1, 5, SPARE1
++> 	or	SPARE1, SPARE2, SPARE2
+ > 	phy_reg_write(0x00d, SPARE5)
+ > 	phy_reg_write(0x00e, SPARE2)
 -> 	mov	SHM(0x1600), SPR_BASE1
 -> 	mov	16, SPARE1
 -> slurp:
--> 	READVAL(off1)
++> 	mov	SPR_BASE1, OFF1SAFE
++> 	mov	0xb00, SPR_BASE1
++> 	mov	32, SPARE1
++> csi_chunk_slurp:
+ > 	READVAL(off1)
 -> 	xadd SPR_BASE1, 2, SPR_BASE1
 -> 	xsub SPARE1, 1, SPARE1
 -> 	xjne SPARE1, 0, slurp-
--> 	mov	OFF1SAFE, SPR_BASE1
++> 	xadd	SPR_BASE1, 2, SPR_BASE1
++> 	xsub	SPARE1, 1, SPARE1
++> 	xjne	SPARE1, 0, csi_chunk_slurp-
+ > 	mov	OFF1SAFE, SPR_BASE1
 -> 	mov	[0x86e], SPARE1
 -> 	mov	SPARE1, [0xaee]
 -> 	mov	[0x86f], SPARE1
@@ -172,57 +317,159 @@ index b8db7b4..04fe6a3 100644
 -> 	calls disable_carrier_search
 -> 	mov 0, CLEANDEAF
 +> 	xadd	CSI_READY, 1, CSI_READY
++> 	xadd	CSI_CHUNK, 1, CSI_CHUNK
++> 	xjne	CSI_CHUNK, 8, csi_chunk_done+
++> 	mov	0, CSI_CHUNK
++> 	xadd	CSI_CORE, 1, CSI_CORE
++> 	xjne	CSI_CORE, 4, csi_chunk_done+
++> 	mov	0, CSI_CORE
++> 	xadd	CSI_NSS, 1, CSI_NSS
++> 	xjne	CSI_NSS, 4, csi_chunk_done+
++> 	mov	0, CSI_NSS
++> csi_chunk_done:
++> 	rets
  > dont_dump_csi:
 -5150,5151c5360,5361
 -< 	mov	0x86E, SPR_RXE_RXHDR_OFFSET
 -< 	mov	0x12, SPR_RXE_RXHDR_LEN
 ----
--> 	mov	SPARE1, SPR_RXE_RXHDR_OFFSET
--> 	mov	RXE_RXHDR_LEN, SPR_RXE_RXHDR_LEN
--6625c6835,6933
-+5140a5022,5026
++5140a5336,5345
 +> 	mov	0, SHM_CSI_COLLECT
 +> 	mov	0, FORCEDEAF
 +> 	mov	0, CLEANDEAF
 +> 	mov	0, DUMP_CSI
 +> 	mov	0, CSI_READY
-+6625c6862,6960
- < 	@0	@0, @0, @0
- \ No newline at end of file
- ---
++> 	mov	0, CSI_ACK
++> 	mov	0, CSI_PENDING
++> 	mov	0, CSI_CORE
++> 	mov	0, CSI_NSS
++> 	mov	0, CSI_CHUNK
++5143a5349,5360
++> csi_send:
+ > 	mov	SPARE1, SPR_RXE_RXHDR_OFFSET
+ > 	mov	RXE_RXHDR_LEN, SPR_RXE_RXHDR_LEN
+-6625c6835,6933
+-< 	@0	@0, @0, @0
+-\ No newline at end of file
+----
+-> 
+-> #define		ClassifierCtrl		0x140
+-> #define		core0_crsControlu	0x167D
+-> #define		core0_crsControll	0x167C
+-> #define		core0_crsControluSub1	0x167F
+-> #define		core0_crsControllSub1	0x167E
+-> #define		core0_computeGainInfo	0x6D4
+-> #define		ed_crsEn		0x339
+-> #define		BBConfig		0x1
+-> #define		RfseqMode		0x400
+-> enable_carrier_search:
+-> 	phy_reg_read(ClassifierCtrl, SPARE1)
+-> 	orxh	4, SPARE1 & ~0x0007, SPARE1
+-> 	phy_reg_write(ClassifierCtrl, SPARE1)
+-> 	mov	0, SPARE1
+-> 	mov	4, SPARE4
+-> luppa_core:
+-> 	mov	core0_crsControlu, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	mov	core0_crsControll, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	mov	core0_crsControluSub1, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	mov	core0_crsControllSub1, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	xadd	0x200, SPARE1, SPARE1
+-> 	xsub	SPARE4, 1, SPARE4
+-> 	xjne	SPARE4, 0, luppa_core-
+-> 	mov	0, SPARE1
+-> 	mov	4, SPARE4
+-> luppa_core:
+-> 	mov	core0_computeGainInfo, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0x4000, SPARE3 & ~0x4000, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	xadd	0x200, SPARE1, SPARE1
+-> 	xsub	SPARE4, 1, SPARE4
+-> 	xjne	SPARE4, 0, luppa_core-
+-> 	phy_reg_write(ed_crsEn, 0)
+-> 	rets
+-> 
+-> disable_carrier_search:
+-> 	phy_reg_read(ClassifierCtrl, SPARE1)
+-> 	orxh	7, SPARE1 & ~0x0007, SPARE1
+-> 	phy_reg_write(ClassifierCtrl, SPARE1)
+-> 	mov	0, SPARE1
+-> 	mov	4, SPARE4
+-> luppa_core:
+-> 	mov	core0_crsControlu, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0x10, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	mov	core0_crsControll, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0x10, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	mov	core0_crsControluSub1, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0x10, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	mov	core0_crsControllSub1, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0x10, SPARE3 & ~0x0010, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	xadd	0x200, SPARE1, SPARE1
+-> 	xsub	SPARE4, 1, SPARE4
+-> 	xjne	SPARE4, 0, luppa_core-
+-> 	mov	0, SPARE1
+-> 	mov	4, SPARE4
+-> luppa_core:
+-> 	mov	core0_computeGainInfo, SPARE2
+-> 	xadd	SPARE2, SPARE1, SPARE2
+-> 	phy_reg_read(SPARE2, SPARE3)
+-> 	orxh	0x0, SPARE3 & ~0x4000, SPARE3
+-> 	phy_reg_write(SPARE2, SPARE3)
+-> 	xadd	0x200, SPARE1, SPARE1
+-> 	xsub	SPARE4, 1, SPARE4
+-> 	xjne	SPARE4, 0, luppa_core-
+-> 	phy_reg_write(ed_crsEn, 0xfff)
++> 	orx	0, 0, 0x1, spr004, spr004
++> csi_send_wait:
++> 	jext	0x06, L809
++> 	xjne	SPR_RXE_RXHDR_LEN, 0x0, csi_send_wait-
++> 	or	r33, 0x0, r33
++> 	xjle	0x0, 0x1, csi_send_done+
++> csi_send_done:
++> 	jext	0x06, L809
+ > 	rets
+-> 
+-> 	@0	@0, @0, @0
++5145,5146c5362,5363
++< 	orx	7, 8, 0x8, 0x6E, spr007
++< 	orx	7, 8, 0x0, 0x12, spr008
++---
++> 	orx	7, 8, 0x8, 0x6e, SPR_RXE_RXHDR_OFFSET
++> 	orx	7, 8, 0x0, 0x12, SPR_RXE_RXHDR_LEN
 diff --git a/src/csi_extractor.c b/src/csi_extractor.c
-index 772e1ac..c761dd3 100644
+index 772e1ac..0a3d537 100644
 --- a/src/csi_extractor.c
 +++ b/src/csi_extractor.c
-@@ -69,25 +69,16 @@ extern void prepend_ethernet_ipv4_udp_header(struct sk_buff *p);
- 
- #define WL_RSSI_ANT_MAX     4           /* max possible rx antennas */
- 
-+#if NEXMON_CHIP != CHIP_VER_BCM4366c0
- // header of csi frame coming from ucode
- struct d11csihdr {
--#if NEXMON_CHIP == CHIP_VER_BCM4366c0
--#define CSIDATA_PER_CHUNK   64
--    uint16 NexmonCSICfg;
--    uint32 csi[CSIDATA_PER_CHUNK>>2];
--    uint16 csiconf;
--    uint16 start;
--    uint8  src[6];
--    uint16 seqcnt;
--    uint16 chanspec;
--#else
-     uint16 RxFrameSize;                 /* 0x000 Set to 0x2 for CSI frames */
-     uint16 NexmonExt;                   /* 0x002 */
-     uint16 NexmonCSICfg;		/* 0x004 Configuration of this CSI */
-     uint16 NexmonCSILen;		/* 0x006 Number of bytes in this chunk */
-     uint32 csi[];                       /* 0x008 Array of CSI data */
--#endif
- } __attribute__((packed));
-+#endif
- 
- // original hardware header
- struct d11rxhdr {
-@@ -152,6 +143,14 @@ uint16 inserted_csi_values = 0;
+@@ -152,6 +152,19 @@ uint16 inserted_csi_values = 0;
  struct sk_buff *p_csi = 0;
  int8 last_rssi = 0;
  uint16 phystatus[6] = {0,0,0,0, 0, 0};
@@ -233,11 +480,16 @@ index 772e1ac..c761dd3 100644
 +uint16 csi_diagnostic_packets = 0;
 +uint16 csi_diagnostic_alloc_failures = 0;
 +uint16 csi_diagnostic_xmit_failures = 0;
++uint16 csi_matrix_sequence = 0;
++void *csi_stream_timer = 0;
++struct sk_buff *csi_stream_packets[16] = { 0 };
++uint16 csi_stream_packet_count = 0;
++uint16 csi_stream_packet_send_index = 0;
 +#endif
  
  void
  create_new_csi_frame(struct wl_info *wl, uint16 csiconf, int length)
-@@ -174,21 +173,184 @@ create_new_csi_frame(struct wl_info *wl, uint16 csiconf, int length)
+@@ -174,19 +187,313 @@ create_new_csi_frame(struct wl_info *wl, uint16 csiconf, int length)
      udpfrm->chip = NEXMON_CHIP;
  }
  
@@ -245,28 +497,56 @@ index 772e1ac..c761dd3 100644
 +#define BCM4366_SHM_NSSMASK             0xB81
 +#define BCM4366_SHM_COREMASK            0xB82
 +#define BCM4366_SHM_CSI_READY           0xBA4
-+#define BCM4366_SHM_CSI_SRC_0           0xB22
-+#define BCM4366_SHM_CSI_SRC_1           0xB23
-+#define BCM4366_SHM_CSI_SRC_2           0xB24
-+#define BCM4366_SHM_CSI_SEQ             0xB25
-+#define BCM4366_SHM_CSI_RXCHAN          0xB26
-+#define BCM4366_SHM_MIN_INTERVAL_MS     0xB94
++#define BCM4366_SHM_CSI_ACK             0xBA5
++#define BCM4366_SHM_CSI_COLLECT         0xB80
++#define BCM4366_SHM_CSI_SRC_0           0xBAC
++#define BCM4366_SHM_CSI_SRC_1           0xBAD
++#define BCM4366_SHM_CSI_SRC_2           0xBAE
++#define BCM4366_SHM_CSI_SEQ             0xBAF
++#define BCM4366_SHM_CSI_RXCHAN          0xBB0
++#define BCM4366_SHM_CSI_BUFFER          0xB00
++#define BCM4366_SHM_CSI_CONFIG          0xBAA
++#define BCM4366_SHM_CSI_CHUNK           0xBAB
++#define BCM4366_SHM_STREAM_TICK_MS      0xB94
 +#define BCM4366_WLC_PHY_TABLE_READ_ACPHY_ADDR 0x2212C9
++#define BCM4366_MIN_STREAM_TICK_MS      1
++#define BCM4366_MATRIX_YIELD_MS         20
++#define BCM4366_PACKET_DRAIN_TICK_MS    2
++#define BCM4366_READS_PER_TICK          16
++#define BCM4366_MCTL_EN_MAC             0x00000001
 +
 +uint32 csi_last_extract_tsf = 0;
 +uint16 csi_diagnostic_rate_limited = 0;
++uint16 csi_stream_pending = 0;
++uint16 csi_stream_core = 0;
++uint16 csi_stream_nss = 0;
++uint16 csi_stream_chunk = 0;
++uint16 csi_stream_src[3] = {0, 0, 0};
++uint16 csi_stream_rxchan = 0;
++uint16 csi_stream_coremask = 0;
++uint16 csi_stream_nssmask = 0;
++uint16 csi_stream_tones = 0;
++uint16 csi_stream_phystatus[6] = {0, 0, 0, 0, 0, 0};
++int8 csi_stream_rssi = 0;
++
++extern void *wl_init_timer(void *wl, void (*fn)(void *arg), void *arg,
++                           const char *name);
++extern void wl_add_timer(void *wl, void *t, uint ms, int periodic);
 +
 +/*
 + * Each receive core has one channel-estimate table.  Its four spatial
-+ * streams occupy contiguous 256-entry regions.  Read a core's table once
-+ * into an aligned scratch buffer, then split it into the 16 wire-format
-+ * packets expected by the collector.  Besides reducing table setup/teardown
-+ * operations from 16 to 4 per matrix, this keeps the PHY reader from writing
-+ * directly into dynamically allocated packet buffers.
++ * streams occupy contiguous 256-entry regions.  The ROM PHY table reader
++ * becomes unsafe when asked for more than one 256-entry region at once.  A
++ * Read exactly one 256-entry stream per timer callback, then yield. Keeping
++ * the PHY register lock around a complete stream reduces lock churn from 64
++ * enter/exit pairs to 16 per 4x4 matrix while never crossing a stream/table
++ * boundary in one ROM call.
 + */
 +#define BCM4366_TONES_PER_NSS           256
++#define BCM4366_TONES_PER_CHUNK         256
++#define BCM4366_CHUNKS_PER_STREAM       1
 +#define BCM4366_NSS_PER_CORE            4
-+uint32 csi_core_values[BCM4366_TONES_PER_NSS * BCM4366_NSS_PER_CORE]
++uint32 csi_stream_values[BCM4366_TONES_PER_NSS]
 +    __attribute__((aligned(4))) = { 1 };
 +
 +typedef void (*bcm4366_phy_table_read_fn)(void *pi, unsigned int id,
@@ -292,172 +572,242 @@ index 772e1ac..c761dd3 100644
 +    }
 +}
 +
-+void
-+process_bcm4366_ready_csi(struct wlc_hw_info *wlc_hw, uint32 tsf_l)
++uint16
++bcm4366_first_enabled(uint16 mask)
 +{
++    uint16 candidate;
++    for (candidate = 0; candidate < BCM4366_NSS_PER_CORE; candidate++) {
++        if (mask & (1 << candidate)) {
++            return candidate;
++        }
++    }
++    return BCM4366_NSS_PER_CORE;
++}
++
++uint16
++bcm4366_next_enabled(uint16 mask, uint16 current)
++{
++    uint16 step;
++    for (step = 1; step <= BCM4366_NSS_PER_CORE; step++) {
++        uint16 candidate = (current + step) & (BCM4366_NSS_PER_CORE - 1);
++        if (mask & (1 << candidate)) {
++            return candidate;
++        }
++    }
++    return current;
++}
++
++int
++bcm4366_advance_stream(void)
++{
++    uint16 first_core = bcm4366_first_enabled(csi_stream_coremask);
++    uint16 first_nss = bcm4366_first_enabled(csi_stream_nssmask);
++    uint16 next_core = bcm4366_next_enabled(
++        csi_stream_coremask, csi_stream_core
++    );
++
++    csi_stream_core = next_core;
++    if (next_core != first_core) {
++        return 0;
++    }
++
++    csi_stream_nss = bcm4366_next_enabled(
++        csi_stream_nssmask, csi_stream_nss
++    );
++    return csi_stream_nss == first_nss;
++}
++
++void
++bcm4366_csi_timer_callback(void *arg)
++{
++    struct wlc_hw_info *wlc_hw = (struct wlc_hw_info *) arg;
++    struct wl_info *wl = wlc_hw->wlc->wl;
++    uint16 tick_ms = wlc_bmac_read_shm(
++        wlc_hw, BCM4366_SHM_STREAM_TICK_MS * 2
++    );
++    if (tick_ms < BCM4366_MIN_STREAM_TICK_MS) {
++        tick_ms = BCM4366_MIN_STREAM_TICK_MS;
++    }
++    uint16 next_tick_ms = tick_ms;
++
++    if (wlc_bmac_read_shm(
++            wlc_hw, BCM4366_SHM_CSI_COLLECT * 2
++        ) == 0) {
++        goto rearm;
++    }
++
 +    uint16 ready = wlc_bmac_read_shm(
 +        wlc_hw, BCM4366_SHM_CSI_READY * 2
 +    );
 +    if (ready == csi_last_ready) {
-+        return;
++        goto rearm;
 +    }
 +
 +    csi_last_ready = ready;
 +    csi_diagnostic_ready++;
++    uint16 csiconf = wlc_bmac_read_shm(
++        wlc_hw, BCM4366_SHM_CSI_CONFIG * 2
++    );
++    uint16 chunk = wlc_bmac_read_shm(
++        wlc_hw, BCM4366_SHM_CSI_CHUNK * 2
++    );
++    if (chunk > 7) {
++        csi_diagnostic_rate_limited++;
++        wlc_bmac_write_shm(
++            wlc_hw, BCM4366_SHM_CSI_ACK * 2, csi_last_ready
++        );
++        goto rearm;
++    }
++    uint16 value_index;
++    for (value_index = 0; value_index < 32; value_index++) {
++        uint16 low = wlc_bmac_read_shm(
++            wlc_hw,
++            (BCM4366_SHM_CSI_BUFFER + value_index * 2) * 2
++        );
++        uint16 high = wlc_bmac_read_shm(
++            wlc_hw,
++            (BCM4366_SHM_CSI_BUFFER + value_index * 2 + 1) * 2
++        );
++        csi_stream_values[chunk * 32 + value_index] =
++            ((uint32) high << 16) | low;
++    }
++    csi_diagnostic_table_reads++;
++    wlc_bmac_write_shm(
++        wlc_hw, BCM4366_SHM_CSI_ACK * 2, csi_last_ready
++    );
++
++    if (chunk != 7) {
++        goto rearm;
++    }
 +
 +    /*
-+     * Reading the channel-estimate tables in the receive hook is expensive
-+     * enough to starve the AP control path during a burst.  The ioctl's delay
-+     * field is interpreted as milliseconds for this AP-concurrent BCM4366
-+     * implementation.  Advance csi_last_ready even when a sample is dropped
-+     * so a burst cannot be replayed later as stale CSI.
++     * The 128 one-millisecond callbacks needed for a 4x4 matrix otherwise
++     * leave no sustained scheduling window for the stock DHD AP work queue.
++     * Yield once at the complete-matrix boundary. This keeps the theoretical
++     * rate above 6 Hz while allowing association and control work to drain.
 +     */
-+    uint32 min_interval_us = (uint32) wlc_bmac_read_shm(
-+        wlc_hw, BCM4366_SHM_MIN_INTERVAL_MS * 2
-+    ) * 1000;
-+    if (min_interval_us != 0 && csi_last_extract_tsf != 0 &&
-+        (uint32) (tsf_l - csi_last_extract_tsf) < min_interval_us) {
-+        csi_diagnostic_rate_limited++;
-+        return;
++    if (csiconf == 0x1b00) {
++        next_tick_ms = BCM4366_MATRIX_YIELD_MS;
 +    }
-+    csi_last_extract_tsf = tsf_l;
 +
-+    uint16 src[3];
-+    src[0] = wlc_bmac_read_shm(wlc_hw, BCM4366_SHM_CSI_SRC_0 * 2);
-+    src[1] = wlc_bmac_read_shm(wlc_hw, BCM4366_SHM_CSI_SRC_1 * 2);
-+    src[2] = wlc_bmac_read_shm(wlc_hw, BCM4366_SHM_CSI_SRC_2 * 2);
-+    uint16 seq = wlc_bmac_read_shm(wlc_hw, BCM4366_SHM_CSI_SEQ * 2);
-+    uint16 rxchan = wlc_bmac_read_shm(
++    csi_stream_src[0] = wlc_bmac_read_shm(
++        wlc_hw, BCM4366_SHM_CSI_SRC_0 * 2
++    );
++    csi_stream_src[1] = wlc_bmac_read_shm(
++        wlc_hw, BCM4366_SHM_CSI_SRC_1 * 2
++    );
++    csi_stream_src[2] = wlc_bmac_read_shm(
++        wlc_hw, BCM4366_SHM_CSI_SRC_2 * 2
++    );
++    csi_stream_rxchan = wlc_bmac_read_shm(
 +        wlc_hw, BCM4366_SHM_CSI_RXCHAN * 2
 +    );
-+    uint16 coremask = wlc_bmac_read_shm(
-+        wlc_hw, BCM4366_SHM_COREMASK * 2
-+    );
-+    uint16 nssmask = wlc_bmac_read_shm(
-+        wlc_hw, BCM4366_SHM_NSSMASK * 2
-+    );
-+    uint16 tones = bcm4366_tones_for_rxchan(rxchan);
-+    struct wl_info *wl = wlc_hw->wlc->wl;
-+
-+    int core;
-+    int nss;
-+    for (core = 0; core < 4; core++) {
-+        if ((coremask & (1 << core)) == 0) {
-+            continue;
-+        }
-+        uint16 table_id = 73 + 32 * core;
-+
-+        /* Stop at the highest requested stream, while retaining the fixed
-+         * 256-entry stride between spatial streams at narrower bandwidths. */
-+        int highest_nss = -1;
-+        for (nss = BCM4366_NSS_PER_CORE - 1; nss >= 0; nss--) {
-+            if (nssmask & (1 << nss)) {
-+                highest_nss = nss;
-+                break;
-+            }
-+        }
-+        if (highest_nss < 0) {
-+            continue;
-+        }
-+
-+        unsigned int table_span = highest_nss * BCM4366_TONES_PER_NSS +
-+                                  tones;
-+        bcm4366_wlc_phy_table_read_acphy(
-+            wlc_hw->band->pi, table_id, table_span, 0, 32,
-+            csi_core_values
-+        );
-+        csi_diagnostic_table_reads++;
-+
-+        for (nss = 0; nss < 4; nss++) {
-+            if ((nssmask & (1 << nss)) == 0) {
-+                continue;
-+            }
-+
-+            create_new_csi_frame(wl, ((nss << 3) | core) << 8,
-+                                 tones * sizeof(uint32));
-+            if (p_csi == 0) {
-+                csi_diagnostic_alloc_failures++;
-+                continue;
-+            }
-+
-+            struct csi_udp_frame *udpfrm =
-+                (struct csi_udp_frame *) p_csi->data;
-+            memcpy(udpfrm->SrcMac, src, sizeof(udpfrm->SrcMac));
-+            udpfrm->seqCnt = seq;
-+            udpfrm->csiconf = ((nss << 3) | core) << 8;
-+            udpfrm->chanspec = rxchan;
-+
-+            memcpy(
-+                udpfrm->csi_values,
-+                &csi_core_values[nss * BCM4366_TONES_PER_NSS],
-+                tones * sizeof(uint32)
-+            );
-+
-+            uint8 offset = (((rxchan & 0x3800) >> 11) == 2) ? 28 : 0;
-+            memcpy(&udpfrm->csi_values[offset], phystatus, sizeof(phystatus));
-+
-+            p_csi->len = sizeof(struct csi_udp_frame) +
-+                         tones * sizeof(uint32);
-+            skb_pull(p_csi, sizeof(struct ethernet_ip_udp_header));
-+            prepend_ethernet_ipv4_udp_header(p_csi);
-+            int xmit_ret = wl->dev->chained->funcs->xmit(
-+                wl->dev, wl->dev->chained, p_csi
-+            );
-+            if (xmit_ret != 0) {
-+                csi_diagnostic_xmit_failures++;
-+            }
-+            p_csi = 0;
-+            csi_diagnostic_packets++;
-+        }
++    create_new_csi_frame(wl, csiconf, 256 * sizeof(uint32));
++    if (p_csi == 0) {
++        csi_diagnostic_alloc_failures++;
++        goto rearm;
 +    }
++    struct csi_udp_frame *udpfrm = (struct csi_udp_frame *) p_csi->data;
++    memcpy(udpfrm->SrcMac, csi_stream_src, sizeof(udpfrm->SrcMac));
++    udpfrm->seqCnt = csi_matrix_sequence;
++    udpfrm->csiconf = csiconf;
++    udpfrm->chanspec = csi_stream_rxchan;
++    memcpy(udpfrm->csi_values, csi_stream_values, 256 * sizeof(uint32));
++    memcpy(udpfrm->csi_values, phystatus, sizeof(phystatus));
++    p_csi->len = sizeof(struct csi_udp_frame) + 256 * sizeof(uint32);
++    skb_pull(p_csi, sizeof(struct ethernet_ip_udp_header));
++    prepend_ethernet_ipv4_udp_header(p_csi);
++    if (wl->dev->chained->funcs->xmit(
++            wl->dev, wl->dev->chained, p_csi
++        ) != 0) {
++        csi_diagnostic_xmit_failures++;
++    }
++    p_csi = 0;
++    csi_diagnostic_packets++;
++    if (csiconf == 0x1b00) {
++        csi_matrix_sequence++;
++    }
++
++rearm:
++    wl_add_timer(wl, csi_stream_timer, next_tick_ms, 0);
++}
++
++void
++bcm4366_reset_csi_stream(struct wlc_hw_info *wlc_hw)
++{
++    csi_stream_pending = 0;
++    csi_stream_chunk = 0;
++    csi_last_ready = wlc_bmac_read_shm(
++        wlc_hw, BCM4366_SHM_CSI_READY * 2
++    );
++    wlc_bmac_write_shm(
++        wlc_hw, BCM4366_SHM_CSI_ACK * 2, csi_last_ready
++    );
++}
++
++void
++bcm4366_start_csi_timer(struct wlc_hw_info *wlc_hw)
++{
++    if (csi_stream_timer != 0) {
++        return;
++    }
++
++    csi_stream_timer = wl_init_timer(
++        wlc_hw->wlc->wl, bcm4366_csi_timer_callback, wlc_hw,
++        "csi_stream"
++    );
++    if (csi_stream_timer != 0) {
++        wl_add_timer(
++            wlc_hw->wlc->wl, csi_stream_timer,
++            BCM4366_MIN_STREAM_TICK_MS, 0
++        );
++    }
++}
++
++int
++bcm4366_is_csi_chunk(struct d11csihdr *frame)
++{
++    uint16 bandwidth = (frame->chanspec & 0x3800) >> 11;
++    uint16 chunks = bandwidth == 4 ? 16 : (bandwidth == 3 ? 8 : 4);
++    uint16 core = (frame->csiconf >> 8) & 0x7;
++    uint16 nss = (frame->csiconf >> 11) & 0x3;
++    uint16 missing = frame->NexmonCSICfg & 0xff;
++
++    /*
++     * Pad is not a CSI discriminator in AP mode: ordinary data frames can
++     * carry non-zero padding.  Validate the complete microcode chunk header
++     * so normal AP traffic continues through wlc_recv unchanged.
++     */
++    return (bandwidth == 2 || bandwidth == 3 || bandwidth == 4) &&
++           (frame->csiconf & 0xff) == 0 &&
++           core < 4 && nss < 4 &&
++           (frame->start & 0x7fff) == chunks &&
++           missing >= 1 && missing <= chunks;
 +}
 +#endif
 +
  void
  process_frame_hook(struct sk_buff *p, struct wlc_d11rxhdr *wlc_rxhdr, struct wlc_hw_info *wlc_hw, int tsf_l)
  {
-+#if NEXMON_CHIP != CHIP_VER_BCM4366c0
      struct osl_info *osh = wlc_hw->wlc->osh;
      struct wl_info *wl = wlc_hw->wlc->wl;
--#if NEXMON_CHIP == CHIP_VER_BCM4366c0
+ #if NEXMON_CHIP == CHIP_VER_BCM4366c0
 -    if (wlc_rxhdr->rxhdr.Pad) {
 -        struct d11csihdr *ucodecsifrm = (struct d11csihdr *) &(wlc_rxhdr->rxhdr.Pad);
--        int missing = ucodecsifrm->NexmonCSICfg & 0xff;
--        int tones = CSIDATA_PER_CHUNK>>2;
--        uint16 csiconf = ucodecsifrm->csiconf;
++    struct d11csihdr *ucodecsifrm =
++        (struct d11csihdr *) &(wlc_rxhdr->rxhdr.Pad);
++    if (wlc_rxhdr->rxhdr.Pad && bcm4366_is_csi_chunk(ucodecsifrm)) {
++        csi_diagnostic_packets++;
+         int missing = ucodecsifrm->NexmonCSICfg & 0xff;
+         int tones = CSIDATA_PER_CHUNK>>2;
+         uint16 csiconf = ucodecsifrm->csiconf;
 -#define NEWCSI	0x8000
 -        // check this is a new frame
--        if (ucodecsifrm->start & NEWCSI) {
--#else
++#define NEWCSI 0x8000
+         if (ucodecsifrm->start & NEWCSI) {
+ #else
      if (wlc_rxhdr->rxhdr.RxFrameSize == 2) {
-         struct d11csihdr *ucodecsifrm = (struct d11csihdr *) &(wlc_rxhdr->rxhdr);
-         int missing = ucodecsifrm->NexmonCSICfg & 0xff;
-@@ -198,7 +360,6 @@ process_frame_hook(struct sk_buff *p, struct wlc_d11rxhdr *wlc_rxhdr, struct wlc
- #define NEWCSI	0x4000
-         // check this is a new frame
-         if (ucodecsifrm->NexmonCSICfg & NEWCSI) {
--#endif
-             if (p_csi != 0) {
-                 printf("unexpected new csi, clearing old\n");
-                 pkt_buf_free_skb(osh, p_csi, 0);
-@@ -276,12 +437,16 @@ process_frame_hook(struct sk_buff *p, struct wlc_d11rxhdr *wlc_rxhdr, struct wlc
-         pkt_buf_free_skb(osh, p, 0);
-         return;
-     }
-+#endif
- 
-     wlc_rxhdr->tsf_l = tsf_l;
-     wlc_phy_rssi_compute(wlc_hw->band->pi, wlc_rxhdr);
-     last_rssi = wlc_rxhdr->rssi;
-     struct d11rxhdr  * rxh = &wlc_rxhdr->rxhdr;
-     memcpy(phystatus, &rxh->PhyRxStatus_0, sizeof(phystatus));
-+#if NEXMON_CHIP == CHIP_VER_BCM4366c0
-+    process_bcm4366_ready_csi(wlc_hw, (uint32) tsf_l);
-+#endif
-     wlc_recv(wlc_hw->wlc, p);
- }
- 
-@@ -323,6 +488,7 @@ process_frame_prehook_off0x8(void)
+@@ -323,6 +630,7 @@ process_frame_prehook_off0x8(void)
  }
  
  
@@ -465,7 +815,7 @@ index 772e1ac..c761dd3 100644
  // Increase d11rxhdr size in initvals (found: below 0c 04 02 00)
  __attribute__((at(0x1D4370, "", CHIP_VER_BCM4339, FW_VER_6_37_32_RC23_34_43_r639704)))
  __attribute__((at(0x1F5768, "", CHIP_VER_BCM43455c0, FW_VER_7_45_189)))
-@@ -349,6 +515,7 @@ __attribute__((at(0x210F60, "", CHIP_VER_BCM43455c0, FW_VER_7_45_189)))
+@@ -349,6 +657,7 @@ __attribute__((at(0x210F60, "", CHIP_VER_BCM43455c0, FW_VER_7_45_189)))
  __attribute__((at(0x1F6802, "", CHIP_VER_BCM4358, FW_VER_7_112_300_14)))
  __attribute__((at(0x2F4332, "", CHIP_VER_BCM4366c0, FW_VER_10_10_122_20)))
  GenericPatch1(hwrxoff_pktget, (RXE_RXHDR_LEN * 2) + RXE_RXHDR_EXTRA + 2);
@@ -474,14 +824,18 @@ index 772e1ac..c761dd3 100644
  //Workaround to skip AMSDU frames. https://github.com/seemoo-lab/nexmon/issues/280#issuecomment-516731866
  __attribute__((at(0x1B6B02, "", CHIP_VER_BCM43455c0,FW_VER_7_45_189)))
 diff --git a/src/ioctl.c b/src/ioctl.c
-index 6fbad1d..e54f114 100644
+index 6fbad1d..9b8651f 100644
 --- a/src/ioctl.c
 +++ b/src/ioctl.c
-@@ -91,6 +91,15 @@
+@@ -91,6 +91,21 @@
  #define FORCEDEAF               0xB92
  #define CLEANDEAF               0xB93
  #define FIFODELAY               0xB94
 +#define CSI_READY               0xBA4
++#define CSI_FILTEREDPKTS        0xBA2
++#define CSI_CHUNK_CONFIG        0xBAA
++#define CSI_CHUNK_START         0xBAB
++#define CSI_CHUNK_RXCHAN        0xBB0
 +extern uint16 csi_last_ready;
 +extern uint16 csi_diagnostic_ready;
 +extern uint16 csi_diagnostic_table_reads;
@@ -490,10 +844,12 @@ index 6fbad1d..e54f114 100644
 +extern uint16 csi_diagnostic_alloc_failures;
 +extern uint16 csi_diagnostic_xmit_failures;
 +extern uint32 csi_last_extract_tsf;
++extern void bcm4366_reset_csi_stream(struct wlc_hw_info *wlc_hw);
++extern void bcm4366_start_csi_timer(struct wlc_hw_info *wlc_hw);
  #else
  #define N_CMP_SRC_MAC           0x888
  #define CMP_SRC_MAC_0_0         0x889
-@@ -143,15 +152,18 @@ wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
+@@ -143,15 +158,18 @@ wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
                  uint16 cmp_src_mac_3_0;     // filter src mac 3
                  uint16 cmp_src_mac_3_1;
                  uint16 cmp_src_mac_3_2;
@@ -515,26 +871,45 @@ index 6fbad1d..e54f114 100644
              // write shared memory
              if (wlc->hw->up && len > 1) {
                  wlc_bmac_write_shm(wlc->hw, SHM_CSI_COLLECT * 2, params->csi_collect);
-@@ -172,7 +184,12 @@ wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
+@@ -172,7 +190,14 @@ wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
                  wlc_bmac_write_shm(wlc->hw, CMP_SRC_MAC_3_0 * 2, params->cmp_src_mac_3_0);
                  wlc_bmac_write_shm(wlc->hw, CMP_SRC_MAC_3_1 * 2, params->cmp_src_mac_3_1);
                  wlc_bmac_write_shm(wlc->hw, CMP_SRC_MAC_3_2 * 2, params->cmp_src_mac_3_2);
 +                /* BCM4366 AP-concurrent extraction uses this value as the
-+                 * minimum interval between full table reads, in milliseconds. */
++                 * delay between deferred per-stream reads, in milliseconds. */
                  wlc_bmac_write_shm(wlc->hw, FIFODELAY * 2, params->delay);
 +#if NEXMON_CHIP == CHIP_VER_BCM4366c0
 +                csi_last_extract_tsf = 0;
++                bcm4366_reset_csi_stream(wlc->hw);
++                bcm4366_start_csi_timer(wlc->hw);
 +#endif
                  ret = IOCTL_SUCCESS;
              }
              break;
-@@ -180,7 +197,25 @@ wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
+@@ -180,7 +205,43 @@ wlc_ioctl_hook(struct wlc_info *wlc, int cmd, char *arg, int len, void *wlc_if)
          case 501:   // get csi collect
          {
              if (wlc->hw->up && len > 1) {
 -                *(uint16 *) arg = wlc_bmac_read_shm(wlc->hw, SHM_CSI_COLLECT * 2);
 +                uint16 *out = (uint16 *) arg;
 +                out[0] = wlc_bmac_read_shm(wlc->hw, SHM_CSI_COLLECT * 2);
++#if NEXMON_CHIP == CHIP_VER_BCM4366c0
++                if (len >= 12) {
++                    out[1] = wlc_bmac_read_shm(
++                        wlc->hw, CSI_FILTEREDPKTS * 2
++                    );
++                    out[2] = wlc_bmac_read_shm(
++                        wlc->hw, CSI_CHUNK_CONFIG * 2
++                    );
++                    out[3] = wlc_bmac_read_shm(
++                        wlc->hw, CSI_CHUNK_START * 2
++                    );
++                    out[4] = wlc_bmac_read_shm(
++                        wlc->hw, CSI_CHUNK_RXCHAN * 2
++                    );
++                    out[5] = csi_diagnostic_packets;
++                }
++#else
 +                if (len >= 6) {
 +                    out[1] = wlc_bmac_read_shm(wlc->hw, CSI_READY * 2);
 +                    out[2] = csi_last_ready;
@@ -552,11 +927,12 @@ index 6fbad1d..e54f114 100644
 +                    out[8] = csi_diagnostic_alloc_failures;
 +                    out[9] = csi_diagnostic_xmit_failures;
 +                }
++#endif
                  ret = IOCTL_SUCCESS;
              }
              break;
 diff --git a/src/version.c b/src/version.c
-index ede7e0e..88e0026 100644
+index ede7e0e..cbb2a3b 100644
 --- a/src/version.c
 +++ b/src/version.c
 @@ -73,7 +73,7 @@ char version[] = "6.37.32 (nexmon.org/csi: " GIT_VERSION "-" BUILD_NUMBER ")\n";
@@ -564,7 +940,7 @@ index ede7e0e..88e0026 100644
  char version[] = "7.112.300.14 (nexmon.org/csi: " GIT_VERSION "-" BUILD_NUMBER ")\n";
  #elif ((NEXMON_CHIP == CHIP_VER_BCM4366c0) && (NEXMON_FW_VERSION == FW_VER_10_10_122_20))
 -char version[] = "10.10.122.20 (nexmon.org/csi: " GIT_VERSION "-" BUILD_NUMBER ")\n";
-+char version[] = "10.10.122.20 (nexmon.org/csi: ap-concurrent-corebatch-" GIT_VERSION "-" BUILD_NUMBER ")\n";
++char version[] = "10.10.122.20 (nexmon.org/csi: ap-concurrent-4x4-shm-yield20-" GIT_VERSION "-" BUILD_NUMBER ")\n";
  #endif
  __attribute__((at(VERSION_PTR, "", CHIP_VER_ALL, FW_VER_ALL)))
  GenericPatch4(version_patch, version);

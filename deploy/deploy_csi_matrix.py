@@ -81,7 +81,7 @@ def deploy(target):
             "python3 -c \"import ast; "
             f"p='{posixpath.join(target['directory'], 'nexcsiserver.py')}'; "
             "s=open(p).read(); print('assembler=', 'assemble_csi_matrix' in s, "
-            "'stream_count=', 'STREAM_COUNT = MATRIX_SIZE * MATRIX_SIZE' in s)\"",
+            "'dynamic_dimensions=', 'required_streams' in s)\"",
         )
         print(f"service={state} {details}")
     finally:

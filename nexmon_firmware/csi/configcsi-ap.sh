@@ -7,7 +7,7 @@ CH=${1:?channel required}
 BW=${2:?bandwidth required}
 SS=${3:?spatial stream count required}
 MAC=${4:-}
-MIN_INTERVAL_MS=${5:-100}
+MIN_INTERVAL_MS=${5:-5}
 CORES=${6:-4}
 IFACE=${AP_CSI_INTERFACE:-eth6}
 WL=${AP_CSI_WL:-/usr/sbin/wl}
@@ -53,6 +53,6 @@ case "$CSI_STATE" in
 esac
 
 echo "csi_collect_enabled=1"
-echo "csi_min_interval_ms=$MIN_INTERVAL_MS"
+echo "csi_stream_tick_ms=$MIN_INTERVAL_MS"
 echo "ap_mode_preserved=1"
 "$WL" -i "$IFACE" status | head -4

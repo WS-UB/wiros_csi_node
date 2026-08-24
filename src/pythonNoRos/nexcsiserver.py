@@ -16,15 +16,17 @@ from csi import parse_frame
 BASE_DIR = Path(__file__).resolve().parent
 LOG = logging.getLogger("wiros-csi")
 VALID_BANDWIDTHS = {20, 40, 80}
-MATRIX_SIZE = 4
-STREAM_COUNT = MATRIX_SIZE * MATRIX_SIZE
+DEFAULT_RX_CORES = 4
 
 
-def assemble_csi_matrix(streams):
-    """Combine a complete 4x4 stream set and FFT-shift each stream."""
+def assemble_csi_matrix(streams, n_tx, n_rx):
+    """Combine a complete stream set and FFT-shift each stream."""
+    expected_streams = {(tx, rx) for tx in range(n_tx) for rx in range(n_rx)}
+    if set(streams) != expected_streams:
+        raise ValueError("incomplete CSI matrix; every configured stream is required")
     first = next(iter(streams.values()))
     n_subcarriers = first["n_subcarriers"]
-    matrix_length = STREAM_COUNT * n_subcarriers
+    matrix_length = n_tx * n_rx * n_subcarriers
     csi_r = [0.0] * matrix_length
     csi_i = [0.0] * matrix_length
     half = n_subcarriers // 2
@@ -32,7 +34,9 @@ def assemble_csi_matrix(streams):
     for (tx, rx), stream in streams.items():
         if stream["n_subcarriers"] != n_subcarriers:
             raise ValueError("inconsistent subcarrier counts in CSI stream set")
-        offset = (tx * MATRIX_SIZE + rx) * n_subcarriers
+        if not 0 <= tx < n_tx or not 0 <= rx < n_rx:
+            raise ValueError("CSI stream index is outside the configured matrix")
+        offset = (tx * n_rx + rx) * n_subcarriers
         csi_r[offset : offset + n_subcarriers] = (
             stream["csi_r"][half:] + stream["csi_r"][:half]
         )
@@ -43,8 +47,8 @@ def assemble_csi_matrix(streams):
     payload = dict(first)
     payload.update(
         {
-            "n_tx": MATRIX_SIZE,
-            "n_rx": MATRIX_SIZE,
+            "n_tx": n_tx,
+            "n_rx": n_rx,
             "layout": "tx,rx,subcarrier",
             "csi_r": csi_r,
             "csi_i": csi_i,
@@ -94,6 +98,13 @@ def validate_config(config, require_router_password=False):
         raise ValueError("capture bandwidth_mhz must be 20, 40, or 80")
     if not 1 <= int(capture["tx_streams"]) <= 4:
         raise ValueError("capture tx_streams must be between 1 and 4")
+    capture_tx_streams = int(
+        capture.get("capture_tx_streams", capture["tx_streams"])
+    )
+    if capture_tx_streams != int(capture["tx_streams"]):
+        raise ValueError("capture capture_tx_streams must equal tx_streams")
+    if not 1 <= int(capture.get("rx_cores", DEFAULT_RX_CORES)) <= 4:
+        raise ValueError("capture rx_cores must be between 1 and 4")
     if not mqtt_config.get("host") or not mqtt_config.get("topic"):
         raise ValueError("MQTT host and topic are required")
     if not 1 <= int(mqtt_config["port"]) <= 65535:
@@ -167,10 +178,28 @@ def connect_mqtt(config):
     return client
 
 
+def publish_matrix(client, topic, payload, qos):
+    """Queue a matrix for MQTT delivery without blocking UDP reception."""
+    result = client.publish(topic, json.dumps(payload), qos=qos)
+    if result.rc == mqtt.MQTT_ERR_QUEUE_SIZE:
+        LOG.warning("discarding CSI frame because the MQTT queue is full")
+        return False
+    if result.rc != mqtt.MQTT_ERR_SUCCESS:
+        raise RuntimeError(f"MQTT publish failed with code {result.rc}")
+    return True
+
+
 def run(config):
     client = connect_mqtt(config)
     receiver = config["receiver"]
+    capture = config["capture"]
     topic = config["mqtt"]["topic"]
+    n_tx = int(capture["tx_streams"])
+    capture_n_tx = int(capture.get("capture_tx_streams", n_tx))
+    n_rx = int(capture.get("rx_cores", DEFAULT_RX_CORES))
+    required_streams = {
+        (tx, rx) for tx in range(capture_n_tx) for rx in range(n_rx)
+    }
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -185,9 +214,6 @@ def run(config):
         actual_buffer,
     )
     qos = int(config["mqtt"].get("qos", 1))
-    publish_timeout = float(
-        config["mqtt"].get("publish_timeout_seconds", 10)
-    )
     pending_streams = {}
     datagram_count = 0
     accepted_stream_count = 0
@@ -210,34 +236,26 @@ def run(config):
                 )
                 continue
             payload["udp_source"] = source[0]
-            mac_filter = config["capture"].get("mac_filter", "").lower()
+            mac_filter = capture.get("mac_filter", "").lower()
             if mac_filter and payload["source_mac"].lower() != mac_filter:
                 continue
-            accepted_stream_count += 1
             key = (payload["source_mac"], payload["sequence"])
             streams = pending_streams.setdefault(key, {})
             stream_key = (payload["tx"], payload["rx"])
+            if stream_key not in required_streams:
+                continue
+            accepted_stream_count += 1
             streams[stream_key] = payload
-            if len(streams) < STREAM_COUNT:
+            if not required_streams.issubset(streams):
                 while len(pending_streams) > 128:
                     pending_streams.pop(next(iter(pending_streams)))
                 continue
-            payload = assemble_csi_matrix(streams)
+            payload = assemble_csi_matrix(
+                {key: streams[key] for key in required_streams}, n_tx, n_rx
+            )
             del pending_streams[key]
             completed_matrix_count += 1
-            result = client.publish(topic, json.dumps(payload), qos=qos)
-            if result.rc == mqtt.MQTT_ERR_QUEUE_SIZE:
-                LOG.warning("discarding CSI frame because the MQTT queue is full")
-                continue
-            if result.rc != mqtt.MQTT_ERR_SUCCESS:
-                raise RuntimeError(f"MQTT publish failed with code {result.rc}")
-            if qos > 0:
-                result.wait_for_publish(timeout=publish_timeout)
-                if not result.is_published():
-                    raise TimeoutError(
-                        "MQTT publish timed out after "
-                        f"{publish_timeout:g} seconds"
-                    )
+            publish_matrix(client, topic, payload, qos)
             now = time.monotonic()
             if now - last_stats_at >= 10:
                 LOG.info(

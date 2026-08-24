@@ -1,6 +1,9 @@
 #!/bin/sh
 # Install the AP-safe CSI driver after the stock driver has completed boot.
 # This script is idempotent so a supervisor can use it as a periodic health check.
+# Once the candidate is loaded, the health path deliberately avoids all wl and
+# nexutil calls: concurrent control ioctls can starve DHD while CSI table export
+# is active. Reachability is checked by the RPi watchdog instead.
 set -u
 
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
@@ -13,7 +16,7 @@ if [ -r "$CONFIG_FILE" ]; then
 fi
 
 MODULE_PATH=${AP_CSI_MODULE_PATH:-/lib/modules/4.1.27/extra/dhd.ko}
-CANDIDATE=${AP_CSI_CANDIDATE:-/jffs/csi/dhd-ap-corebatch-10hz.ko}
+CANDIDATE=${AP_CSI_CANDIDATE:-/jffs/csi/dhd-ap-concurrent.ko}
 STOCK_BACKUP=${AP_CSI_STOCK_BACKUP:-/jffs/csi/dhd-stock-original-ac4f5be9.ko}
 CONFIGURE=${AP_CSI_CONFIGURE:-/jffs/csi/configcsi-ap.sh}
 NEXUTIL=${AP_CSI_NEXUTIL:-/jffs/csi/nexutil}
@@ -29,8 +32,9 @@ REBOOT=${AP_CSI_REBOOT:-/sbin/reboot}
 MD5SUM=${AP_CSI_MD5SUM:-/usr/bin/md5sum}
 NVRAM=${AP_CSI_NVRAM:-nvram}
 SLEEP=${AP_CSI_SLEEP:-/bin/sleep}
+KILLALL=${AP_CSI_KILLALL:-/usr/bin/killall}
 
-EXPECTED_CANDIDATE=${AP_CSI_EXPECTED_CANDIDATE_MD5:-9ff275147762c7c7f53dc78f757cb55c}
+EXPECTED_CANDIDATE=${AP_CSI_EXPECTED_CANDIDATE_MD5:-1e37e15766204e56924c277c3382a954}
 EXPECTED_STOCK=${AP_CSI_EXPECTED_STOCK_MD5:-ac4f5be9e63816e1eea59490853c1b6b}
 RADIO_INTERFACE=${AP_CSI_INTERFACE:-eth6}
 BRIDGE=${AP_CSI_BRIDGE:-br0}
@@ -42,9 +46,12 @@ DISABLED_NVRAM_PREFIXES=${AP_CSI_DISABLED_NVRAM_PREFIXES:-wl0}
 CHANNEL=${AP_CSI_CHANNEL:-36}
 BANDWIDTH=${AP_CSI_BANDWIDTH_MHZ:-80}
 TX_STREAMS=${AP_CSI_TX_STREAMS:-4}
-TARGET_MAC=${AP_CSI_TARGET_MAC:-20:f0:94:2a:7d:47}
-MIN_INTERVAL_MS=${AP_CSI_MIN_INTERVAL_MS:-${AP_CSI_PACKET_DELAY:-100}}
+TARGET_MAC=${AP_CSI_TARGET_MAC:-a6:aa:40:58:22:bd}
+MIN_INTERVAL_MS=${AP_CSI_MIN_INTERVAL_MS:-${AP_CSI_PACKET_DELAY:-1}}
 RX_CORES=${AP_CSI_RX_CORES:-4}
+QUIESCE_PROCESSES=${AP_CSI_QUIESCE_PROCESSES:-"dhd_monitor roamast wlc_nt networkmap wps_monitor wpsaide wlceventd watchdog bwdpi_check cfg_server mastiff"}
+QUIESCE_INTERVAL=${AP_CSI_QUIESCE_INTERVAL_SECONDS:-2}
+QUIESCE_PID_FILE=${AP_CSI_QUIESCE_PID_FILE:-/tmp/ap-csi-quiesce.pid}
 EXPECTED_CHANSPEC=$CHANNEL/$BANDWIDTH
 LOG=${AP_CSI_LOG:-/tmp/ap-csi-autostart.log}
 LOCK=${AP_CSI_LOCK:-/tmp/ap-csi-autostart.lock}
@@ -67,6 +74,42 @@ add_bridge_interfaces() {
     for interface in $BRIDGE_INTERFACES; do
         "$BRCTL" addif "$BRIDGE" "$interface" 2>/dev/null || true
     done
+}
+
+quiesce_wireless_helpers() {
+    for process in $QUIESCE_PROCESSES; do
+        "$KILLALL" "$process" 2>/dev/null || true
+    done
+}
+
+# restart_wireless launches several ASUS management helpers asynchronously.
+# A one-shot kill is therefore racy: a late helper can issue a DHD control
+# ioctl after continuous CSI has started and eventually wedge the AP radio.
+# Keep those nonessential helpers suppressed for the lifetime of AP+CSI mode.
+# Authentication, DHCP, bridging, and routing processes are not in the list.
+start_quiesce_supervisor() {
+    if [ -r "$QUIESCE_PID_FILE" ]; then
+        supervisor_pid=$(cat "$QUIESCE_PID_FILE" 2>/dev/null || true)
+        case "$supervisor_pid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if kill -0 "$supervisor_pid" 2>/dev/null; then
+                    return 0
+                fi
+                ;;
+        esac
+    fi
+
+    (
+        trap 'rm -f "$QUIESCE_PID_FILE"; exit 0' HUP INT TERM EXIT
+        while :; do
+            quiesce_wireless_helpers
+            "$SLEEP" "$QUIESCE_INTERVAL"
+        done
+    ) </dev/null >>"$LOG" 2>&1 &
+    supervisor_pid=$!
+    printf '%s\n' "$supervisor_pid" >"$QUIESCE_PID_FILE"
+    log "quiesce_supervisor_started=1 pid=$supervisor_pid interval_seconds=$QUIESCE_INTERVAL"
 }
 
 persist_wireless_identity() {
@@ -186,64 +229,15 @@ persist_wireless_identity
 
 current_hash=$(file_md5 "$MODULE_PATH")
 if [ "$current_hash" = "$EXPECTED_CANDIDATE" ]; then
-    if ! "$WL" -i "$RADIO_INTERFACE" status >/dev/null 2>&1; then
-        log "candidate_health_failed reason=radio_status interface=$RADIO_INTERFACE"
-        exit 1
+    if configuration_is_current; then
+        start_quiesce_supervisor
+        exit 0
     fi
 
-    csi_state=$("$NEXUTIL" -I "$RADIO_INTERFACE" -g501 -l2 2>/dev/null) || {
-        log "candidate_health_failed reason=csi_ioctl"
-        exit 1
-    }
-
-    case "$csi_state" in
-        *"01 00"*)
-            enforce_wireless_identity || {
-                log "candidate_health_failed reason=wireless_identity"
-                exit 1
-            }
-            "$WL" -i "$RADIO_INTERFACE" bss | grep -q '^up$' || {
-                log "candidate_health_failed reason=ap_bss_down"
-                exit 1
-            }
-            "$WL" -i "$RADIO_INTERFACE" chanspec | grep -F -q "$EXPECTED_CHANSPEC" || {
-                log "candidate_health_failed reason=wrong_chanspec"
-                exit 1
-            }
-            if ! configuration_is_current; then
-                log "candidate_loaded csi_configuration_refresh_started=1"
-                configure_csi || {
-                    log "candidate_health_failed reason=csi_configuration_refresh"
-                    exit 1
-                }
-                "$NEXUTIL" -I "$RADIO_INTERFACE" -g501 -l2 | grep -q '01 00' || {
-                    log "candidate_health_failed reason=csi_configuration_refresh_verify"
-                    exit 1
-                }
-                remember_configuration
-                log "candidate_configuration_refresh_complete=1"
-            fi
-            exit 0
-            ;;
-        *"00 00"*)
-            log "candidate_loaded csi_reconfigure_started=1"
-            configure_csi || {
-                log "candidate_health_failed reason=csi_reconfiguration"
-                exit 1
-            }
-            "$NEXUTIL" -I "$RADIO_INTERFACE" -g501 -l2 | grep -q '01 00' || {
-                log "candidate_health_failed reason=csi_reconfiguration_verify"
-                exit 1
-            }
-            remember_configuration
-            log "candidate_reconfigure_complete=1"
-            exit 0
-            ;;
-        *)
-            log "candidate_health_failed reason=unexpected_csi_state"
-            exit 1
-            ;;
-    esac
+    # A changed or lost signature must be applied from a clean stock-driver
+    # boot. Never try to reconfigure the live AP+CSI driver in place.
+    log "candidate_configuration_change_requires_reboot=1"
+    exit 1
 fi
 
 [ "$current_hash" = "$EXPECTED_STOCK" ] || {
@@ -257,6 +251,7 @@ fi
 }
 
 log "candidate_install_started=1"
+quiesce_wireless_helpers
 "$RMMOD" dhd || {
     log "stock_unload_failed=1"
     exit 1
@@ -265,6 +260,7 @@ log "candidate_install_started=1"
 "$MOUNT" -o bind "$CANDIDATE" "$MODULE_PATH" || restore_stock candidate_bind_failed
 "$INSMOD" "$MODULE_PATH" || restore_stock candidate_load_failed
 "$SERVICE" restart_wireless || restore_stock wireless_restart_failed
+quiesce_wireless_helpers
 
 ready=0
 attempt=0
@@ -290,6 +286,7 @@ configure_csi || restore_stock csi_configuration_failed
 "$WL" -i "$RADIO_INTERFACE" chanspec | grep -F -q "$EXPECTED_CHANSPEC" || restore_stock wrong_chanspec
 "$NEXUTIL" -I "$RADIO_INTERFACE" -g501 -l2 | grep -q '01 00' || restore_stock csi_verification_failed
 remember_configuration
+start_quiesce_supervisor
 
 log "candidate_install_complete=1 ap_mode=1 csi_enabled=1 interface=$RADIO_INTERFACE chanspec=$EXPECTED_CHANSPEC"
 exit 0

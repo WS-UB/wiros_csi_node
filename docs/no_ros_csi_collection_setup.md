@@ -13,9 +13,9 @@ The concurrent driver is specific to this platform:
 - firmware target `10_10_122_20`
 - router kernel `4.1.27`
 - 5 GHz channel 36 at 80 MHz
-- four transmit streams and four receive cores
+- four measured Pixel transmit streams and four receive cores (a native 4-by-4 output)
 - Pixel frames selected by their Wi-Fi MAC address
-- CSI extraction minimum interval of 100 ms
+- 32-tone PHY reads in microcode, copied through shared memory on a 1 ms host timer
 - NoROS receivers running on Raspberry Pis
 
 Do not load the concurrent module on a different chipset, firmware target, kernel, or stock `dhd.ko` without rebuilding and validating it. The scripts refuse known hash mismatches, but a correct hash does not make an artifact compatible with different hardware.
@@ -23,7 +23,7 @@ Do not load the concurrent module on a different chipset, firmware target, kerne
 The tested concurrent module has MD5:
 
 ```text
-9ff275147762c7c7f53dc78f757cb55c
+1e37e15766204e56924c277c3382a954
 ```
 
 The tested router's stock module has MD5:
@@ -34,7 +34,7 @@ ac4f5be9e63816e1eea59490853c1b6b
 
 These are reference values for the tested artifacts, not universal BCM4366 hashes. Record and configure the hashes of the exact artifacts used in each deployment.
 
-At the 100 ms safety limit, a controlled 5 Hz stream produced approximately 50–53 complete matrices per ten seconds. Two staggered 5 Hz streams produced approximately 61–79 matrices per ten seconds during a sustained test. The configured interval is a safety ceiling, not a guaranteed output rate; RF conditions and qualifying phone traffic determine the actual rate.
+With the 1 ms shared-memory timer and a 20 ms yield after each complete matrix, the final controlled run sustained 66-68 complete 4-by-4 matrices per 10 seconds in the NoROS relay. An external 10-second capture observed 971 CSI packets, or about 6.1 complete matrices per second after grouping 16 streams per matrix. A subsequent 20-minute run kept the Pixel associated, the AP responsive, and the Pixel-to-RPi data path available on every 30-second sample. RF conditions and scheduling jitter still determine the instantaneous output rate.
 
 ## 2. Architecture
 
@@ -164,7 +164,7 @@ For the tested radio configuration:
 
 ```sh
 ssh <router-user>@<router-ip> \
-  '/jffs/csi/setup.sh 36 80 4 20:f0:94:2a:7d:47'
+  '/jffs/csi/setup.sh 36 80 4 a6:aa:40:58:22:bd'
 ```
 
 This path loads the passive driver once per router boot, enables monitor mode, brings the capture-radio BSS down, and reattaches the radio interfaces to `br0` so CSI UDP broadcasts reach the paired RPi.
@@ -187,7 +187,7 @@ The channel must match the AP+CSI router, CSI state must begin with `01 00`, and
 
 ## 7. Use or build the concurrent AP+CSI module
 
-The exact tested module is committed at `nexmon_firmware/csi/dhd-ap-corebatch-10hz.ko`. Its MD5 is `9ff275147762c7c7f53dc78f757cb55c`; use that file for the validated deployment. Rebuild only to reproduce the artifact or develop another candidate.
+The exact tested module is at `nexmon_firmware/csi/dhd-ap-concurrent.ko`. Its MD5 is `1e37e15766204e56924c277c3382a954`; use that file for the validated deployment. Microcode reads one 32-tone channel-estimate chunk at a time into reserved shared memory; the host timer copies that chunk without suspending the MAC or touching the PHY table. After each complete matrix, the scheduler yields for 20 ms so the stock AP work queue can drain. It emits all 16 measured 4-by-4 streams, so the NoROS relay does not synthesize or pad transmit planes. Rebuild only to reproduce the artifact or develop another candidate.
 
 The tested source is based on:
 
@@ -214,7 +214,7 @@ FROM ubuntu:18.04
 RUN dpkg --add-architecture i386 \
  && apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-      git make gcc g++ gawk qpdf flex bison xxd patch zlib1g-dev \
+      git make gcc g++ gawk qpdf flex bison xxd patch python-minimal zlib1g-dev \
       zlib1g-dev:i386 libc6:i386 libncurses5:i386 libstdc++6:i386 \
  && rm -rf /var/lib/apt/lists/*
 CMD ["tail", "-f", "/dev/null"]
@@ -228,7 +228,7 @@ docker run --rm --platform linux/amd64 \
   -v "$PWD/.build/nexmon:/nexmon" \
   -v "$PWD/nexmon_firmware/nexmon_csi:/nexmon/patches/bcm4366c0/10_10_122_20/nexmon_csi" \
   wires-nexmon-builder:18.04 \
-  bash -lc 'cd /nexmon && source setup_env.sh && make -j2'
+  bash -lc 'source /nexmon/setup_env.sh && make -C /nexmon/buildtools -j1 && make -C /nexmon/firmwares/bcm4366c0/10_10_122_20 -j1'
 
 docker run --rm --platform linux/amd64 \
   -v "$PWD/.build/nexmon:/nexmon" \
@@ -286,8 +286,8 @@ Keep this file. The recovery path uses it if the underlying stock path is ever i
 Copy the committed, checksum-verified candidate:
 
 ```sh
-scp nexmon_firmware/csi/dhd-ap-corebatch-10hz.ko \
-  <router-user>@<ap-csi-router-ip>:/jffs/csi/dhd-ap-corebatch-10hz.ko
+scp nexmon_firmware/csi/dhd-ap-concurrent.ko \
+  <router-user>@<ap-csi-router-ip>:/jffs/csi/dhd-ap-concurrent.ko
 ```
 
 If deploying a new build instead, give it a distinct filename, calculate its MD5, and update both candidate values below.
@@ -302,9 +302,9 @@ At minimum, verify or change:
 
 ```dotenv
 AP_CSI_MODULE_PATH=/lib/modules/4.1.27/extra/dhd.ko
-AP_CSI_CANDIDATE=/jffs/csi/dhd-ap-corebatch-10hz.ko
+AP_CSI_CANDIDATE=/jffs/csi/dhd-ap-concurrent.ko
 AP_CSI_STOCK_BACKUP=/jffs/csi/dhd-stock-original-ac4f5be9.ko
-AP_CSI_EXPECTED_CANDIDATE_MD5=9ff275147762c7c7f53dc78f757cb55c
+AP_CSI_EXPECTED_CANDIDATE_MD5=1e37e15766204e56924c277c3382a954
 AP_CSI_EXPECTED_STOCK_MD5=ac4f5be9e63816e1eea59490853c1b6b
 AP_CSI_INTERFACE=eth6
 AP_CSI_SSID=WIRES-AP
@@ -316,7 +316,8 @@ AP_CSI_BANDWIDTH_MHZ=80
 AP_CSI_TX_STREAMS=4
 AP_CSI_RX_CORES=4
 AP_CSI_TARGET_MAC=<pixel-wifi-mac>
-AP_CSI_MIN_INTERVAL_MS=100
+AP_CSI_MIN_INTERVAL_MS=1
+AP_CSI_QUIESCE_INTERVAL_SECONDS=2
 ```
 
 Then install it:
@@ -384,7 +385,8 @@ Create `/opt/wiros_csi_node/src/pythonNoRos/config.json` separately on every Pi.
     "channel": 36,
     "bandwidth_mhz": 80,
     "tx_streams": 4,
-    "mac_filter": "20:f0:94:2a:7d:47"
+    "rx_cores": 4,
+    "mac_filter": "a6:aa:40:58:22:bd"
   },
   "mqtt": {
     "host": "<central-eduroam-ip>",
@@ -415,7 +417,7 @@ journalctl -u wiros-csi-node.service -n 50 --no-pager
 
 The supplied unit runs as user `wiloc` from `/opt/wiros_csi_node`. Change `User`, ownership, and paths together if another account or install path is used.
 
-The receiver listens for UDP port 5500, decodes Nexmon frames, groups all 16 stream/core packets for one MAC and sequence, and publishes only completed matrices. It does not require ROS.
+The receiver listens for UDP port 5500, decodes Nexmon frames, groups the configured stream/core packets for one MAC and sequence, pads any configured output-only transmit planes, and publishes only completed matrices. It does not require ROS.
 
 ## 10. Configure the Pixel MQTT relay
 
@@ -582,11 +584,11 @@ The ten 16-bit values returned by ioctl 501 with length 20 are:
 5. PHY table reads.
 6. emitted CSI UDP packets.
 7. rate-limited events.
-8. configured minimum interval in milliseconds.
+8. configured deferred-read timer tick in milliseconds.
 9. packet-allocation failures.
 10. transmit failures.
 
-Counters wrap at 65,536. With all four cores and streams, accepted matrices should account for four table reads and sixteen emitted packets each. Allocation and transmit failure counters should remain zero.
+Counters wrap at 65,536. With four Pixel transmit streams and four receive cores, each accepted matrix consists of 128 bounded 32-tone chunks and 16 emitted packets. Allocation and transmit failure counters should remain zero.
 
 ### 14.2 RPi checks
 
@@ -623,7 +625,7 @@ After one confirmed Pixel point, ingestion should log that the phone sample was 
 find server/data/parquet -type f -name '*.parquet' -print | sort | tail -1
 ```
 
-A valid three-router record contains Pixel `GPS`, `IMU`, `WiFi`, and `ground_truth` fields plus `CSI` entries for `router-1`, `router-2`, and `router-3`. Each router entry should report `n_tx=4`, `n_rx=4`, `n_subcarriers=256`, and arrays of length 4,096. A six-router deployment must contain all six configured entries.
+A valid three-router record contains Pixel `GPS`, `IMU`, `WiFi`, and `ground_truth` fields plus `CSI` entries for `router-1`, `router-2`, and `router-3`. Every router, including the AP+CSI router, should report `n_tx=4`, `n_rx=4`, `n_subcarriers=256`, and arrays of length 4,096. A six-router deployment must contain all six configured entries.
 
 ### 14.4 Reboot acceptance test
 
@@ -666,11 +668,12 @@ This test proves both connectivity and data persistence. Seeing matrices in a re
 
 ### Matrices are incomplete or slow
 
-- One full 4-by-4 matrix requires all 16 datagrams with the same sequence.
+- For a two-stream Pixel, a complete measured matrix requires eight datagrams with the same sequence; the NoROS relay pads it to the configured 4-by-4 output shape.
 - Check the RPi receiver's `datagrams`, `accepted_streams`, `matrices`, and `pending` statistics.
 - Keep `receive_buffer_bytes` at least 4 MiB.
-- On the AP+CSI router, confirm four table reads and sixteen emitted packets per accepted matrix and zero allocation/transmit failures.
-- Do not lower `AP_CSI_MIN_INTERVAL_MS` below the tested 100 ms without repeating packet-loss, latency, soak, and reboot tests.
+- On the AP+CSI router, confirm 128 bounded 32-tone chunks and 16 emitted packets per accepted matrix, with zero allocation/transmit failures.
+- `AP_CSI_MIN_INTERVAL_MS` is the shared-memory transfer timer tick for this driver. The validated value is 1 ms. Together with the driver's fixed 20 ms complete-matrix yield, it sustained roughly 6.1-6.8 complete 4-by-4 matrices per second; any change requires repeating packet-loss, latency, soak, association, and reboot tests.
+- `AP_CSI_QUIESCE_INTERVAL_SECONDS` controls the lightweight guard that suppresses ASUS management helpers which issue competing DHD control requests. The validated value is 2 seconds. Do not add authentication, DHCP, bridging, or routing services to `AP_CSI_QUIESCE_PROCESSES`.
 
 ### The phone sample remains buffered and no Parquet appears
 
