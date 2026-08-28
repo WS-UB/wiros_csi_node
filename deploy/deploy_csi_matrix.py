@@ -1,3 +1,4 @@
+import argparse
 import os
 import posixpath
 from datetime import datetime, timezone
@@ -12,17 +13,24 @@ PASSWORD = os.environ["WIRES_PI_PASSWORD"]
 TARGETS = (
     {
         "name": "router-2",
-        "host": "100.103.185.11",
+        "host": "10.84.118.167",
         "directory": "/opt/wiros_csi_node/src/pythonNoRos",
         "service": "wiros-csi.service",
         "config": "config2.json",
     },
     {
         "name": "router-1",
-        "host": "100.95.115.44",
+        "host": "10.84.98.51",
         "directory": "/opt/wiros_csi_node/src/pythonNoRos",
-        "service": "wiros-csi-node.service",
+        "service": "wiros-csi-rpi1.service",
         "config": "config.json",
+    },
+    {
+        "name": "router-3",
+        "host": "10.84.121.7",
+        "directory": "/opt/wiros_csi_node/src/pythonNoRos",
+        "service": "wiros-csi-rpi3.service",
+        "config": "config3.json",
     },
 )
 FILES = ("csi.py", "nexcsiserver.py")
@@ -81,12 +89,34 @@ def deploy(target):
             "python3 -c \"import ast; "
             f"p='{posixpath.join(target['directory'], 'nexcsiserver.py')}'; "
             "s=open(p).read(); print('assembler=', 'assemble_csi_matrix' in s, "
-            "'stream_count=', 'STREAM_COUNT = MATRIX_SIZE * MATRIX_SIZE' in s)\"",
+            "'dynamic_dimensions=', 'required_streams' in s)\"",
         )
         print(f"service={state} {details}")
     finally:
         client.close()
 
 
-for item in TARGETS:
-    deploy(item)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--target", choices=tuple(item["name"] for item in TARGETS)
+    )
+    parser.add_argument(
+        "--host",
+        help="SSH host override; requires --target (useful for direct Ethernet)",
+    )
+    args = parser.parse_args()
+    if args.host and not args.target:
+        parser.error("--host requires --target")
+
+    selected = [item.copy() for item in TARGETS]
+    if args.target:
+        selected = [item for item in selected if item["name"] == args.target]
+    if args.host:
+        selected[0]["host"] = args.host
+    for item in selected:
+        deploy(item)
+
+
+if __name__ == "__main__":
+    main()
