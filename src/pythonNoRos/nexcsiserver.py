@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -17,6 +18,33 @@ BASE_DIR = Path(__file__).resolve().parent
 LOG = logging.getLogger("wiros-csi")
 VALID_BANDWIDTHS = {20, 40, 80}
 DEFAULT_RX_CORES = 4
+MAC_ADDRESS_PATTERN = re.compile(r"^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
+
+
+def get_mac_filters(capture):
+    """Return the normalized source-MAC allowlist from new or legacy config."""
+    if "mac_filters" in capture:
+        raw_filters = capture["mac_filters"]
+        if not isinstance(raw_filters, list) or not raw_filters:
+            raise ValueError("capture mac_filters must be a non-empty list")
+        if "mac_filter" in capture:
+            raise ValueError("capture cannot define both mac_filter and mac_filters")
+    else:
+        legacy_filter = capture.get("mac_filter")
+        raw_filters = [legacy_filter] if legacy_filter else []
+
+    normalized = []
+    for mac in raw_filters:
+        if not isinstance(mac, str) or not MAC_ADDRESS_PATTERN.fullmatch(mac):
+            raise ValueError("capture mac_filters entries must be full MAC addresses")
+        normalized.append(mac.lower())
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("capture mac_filters must not contain duplicates")
+    return tuple(normalized)
+
+
+def is_source_mac_allowed(source_mac, allowed_macs):
+    return not allowed_macs or source_mac.lower() in allowed_macs
 
 
 def assemble_csi_matrix(streams, n_tx, n_rx):
@@ -105,6 +133,7 @@ def validate_config(config, require_router_password=False):
         raise ValueError("capture capture_tx_streams must equal tx_streams")
     if not 1 <= int(capture.get("rx_cores", DEFAULT_RX_CORES)) <= 4:
         raise ValueError("capture rx_cores must be between 1 and 4")
+    get_mac_filters(capture)
     if not mqtt_config.get("host") or not mqtt_config.get("topic"):
         raise ValueError("MQTT host and topic are required")
     if not 1 <= int(mqtt_config["port"]) <= 65535:
@@ -137,9 +166,9 @@ def configure_router(config):
         str(capture["bandwidth_mhz"]),
         str(capture["tx_streams"]),
     ]
-    mac_filter = capture.get("mac_filter")
-    if mac_filter:
-        command.append(mac_filter)
+    mac_filters = get_mac_filters(capture)
+    if len(mac_filters) == 1:
+        command.append(mac_filters[0])
     subprocess.run(command, check=True)
 
 
@@ -200,6 +229,7 @@ def run(config):
     required_streams = {
         (tx, rx) for tx in range(capture_n_tx) for rx in range(n_rx)
     }
+    allowed_macs = set(get_mac_filters(capture))
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -236,8 +266,7 @@ def run(config):
                 )
                 continue
             payload["udp_source"] = source[0]
-            mac_filter = capture.get("mac_filter", "").lower()
-            if mac_filter and payload["source_mac"].lower() != mac_filter:
+            if not is_source_mac_allowed(payload["source_mac"], allowed_macs):
                 continue
             key = (payload["source_mac"], payload["sequence"])
             streams = pending_streams.setdefault(key, {})
