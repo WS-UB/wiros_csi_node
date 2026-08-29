@@ -248,7 +248,39 @@ def run(config):
     datagram_count = 0
     accepted_stream_count = 0
     completed_matrix_count = 0
+    rejected_mac_count = 0
+    rejected_stream_count = 0
+    observed_macs = set()
+    observed_streams = set()
     last_stats_at = time.monotonic()
+
+    def log_stats_if_due():
+        nonlocal datagram_count, accepted_stream_count, completed_matrix_count
+        nonlocal rejected_mac_count, rejected_stream_count, last_stats_at
+        now = time.monotonic()
+        if now - last_stats_at < 10:
+            return
+        LOG.info(
+            "CSI stats datagrams=%s accepted_streams=%s matrices=%s pending=%s "
+            "rejected_mac=%s rejected_stream=%s observed_macs=%s observed_streams=%s",
+            datagram_count,
+            accepted_stream_count,
+            completed_matrix_count,
+            len(pending_streams),
+            rejected_mac_count,
+            rejected_stream_count,
+            sorted(observed_macs),
+            sorted(observed_streams),
+        )
+        datagram_count = 0
+        accepted_stream_count = 0
+        completed_matrix_count = 0
+        rejected_mac_count = 0
+        rejected_stream_count = 0
+        observed_macs.clear()
+        observed_streams.clear()
+        last_stats_at = now
+
     try:
         while True:
             data, source = sock.recvfrom(16384)
@@ -264,20 +296,28 @@ def run(config):
                     source[1],
                     error,
                 )
+                log_stats_if_due()
                 continue
             payload["udp_source"] = source[0]
+            observed_macs.add(payload["source_mac"])
             if not is_source_mac_allowed(payload["source_mac"], allowed_macs):
+                rejected_mac_count += 1
+                log_stats_if_due()
                 continue
             key = (payload["source_mac"], payload["sequence"])
             streams = pending_streams.setdefault(key, {})
             stream_key = (payload["tx"], payload["rx"])
+            observed_streams.add(stream_key)
             if stream_key not in required_streams:
+                rejected_stream_count += 1
+                log_stats_if_due()
                 continue
             accepted_stream_count += 1
             streams[stream_key] = payload
             if not required_streams.issubset(streams):
                 while len(pending_streams) > 128:
                     pending_streams.pop(next(iter(pending_streams)))
+                log_stats_if_due()
                 continue
             payload = assemble_csi_matrix(
                 {key: streams[key] for key in required_streams}, n_tx, n_rx
@@ -285,19 +325,7 @@ def run(config):
             del pending_streams[key]
             completed_matrix_count += 1
             publish_matrix(client, topic, payload, qos)
-            now = time.monotonic()
-            if now - last_stats_at >= 10:
-                LOG.info(
-                    "CSI stats datagrams=%s accepted_streams=%s matrices=%s pending=%s",
-                    datagram_count,
-                    accepted_stream_count,
-                    completed_matrix_count,
-                    len(pending_streams),
-                )
-                datagram_count = 0
-                accepted_stream_count = 0
-                completed_matrix_count = 0
-                last_stats_at = now
+            log_stats_if_due()
     finally:
         sock.close()
         client.loop_stop()
